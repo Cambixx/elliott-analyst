@@ -1,0 +1,3 @@
+# La app llama a data-api.binance.vision directamente (permite CORS), no hace falta proxy.
+# Fallback SPA (la app no tiene rutas cliente, pero es buena práctica).
+/*  /index.html  200

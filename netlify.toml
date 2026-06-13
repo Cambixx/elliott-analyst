@@ -1,0 +1,6 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Las reglas de proxy/redirect están en public/_redirects para que también
+# funcionen en despliegues por arrastrar la carpeta dist (acaban dentro de dist/).
