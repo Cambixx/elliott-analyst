@@ -5,7 +5,10 @@ import { calibrate, type Calibration } from '@/domain/elliott/calibration'
 
 export interface BacktestInsight {
   result: BacktestResult
+  /** Calibración de los conteos CONFIRMADOS. */
   calibration: Calibration
+  /** Calibración de los PRONÓSTICOS EN DESARROLLO (continuación). */
+  developingCalibration: Calibration
 }
 
 // maxEvaluations menor que antes: el backtest ahora corre multi-grado (3× detector
@@ -29,28 +32,33 @@ export function useBacktest(candles: Candle[] | undefined, sensitivity: number):
       return
     }
 
-    const finish = (result: BacktestResult, calibration: Calibration) => {
-      setInsight(result.resolved === 0 ? null : { result, calibration })
+    const finish = (result: BacktestResult, calibration: Calibration, developingCalibration: Calibration) => {
+      // Hay panel si hay al menos una pista con datos (confirmados o en desarrollo).
+      const has = result.resolved > 0 || result.developingResolved > 0
+      setInsight(has ? { result, calibration, developingCalibration } : null)
+    }
+    const runSync = () => {
+      const result = runBacktest(closed, sensitivity, OPTS)
+      finish(result, calibrate(result.outcomes), calibrate(result.developingOutcomes))
     }
 
     // Fallback síncrono (p.ej. entornos sin Worker).
     if (typeof Worker === 'undefined') {
-      const result = runBacktest(closed, sensitivity, OPTS)
-      finish(result, calibrate(result.outcomes))
+      runSync()
       return
     }
 
     let cancelled = false
     const worker = new Worker(new URL('./backtest.worker.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = (e: MessageEvent<{ result: BacktestResult; calibration: Calibration }>) => {
-      if (!cancelled) finish(e.data.result, e.data.calibration)
+    worker.onmessage = (
+      e: MessageEvent<{ result: BacktestResult; calibration: Calibration; developingCalibration: Calibration }>,
+    ) => {
+      if (!cancelled) finish(e.data.result, e.data.calibration, e.data.developingCalibration)
     }
     worker.onerror = () => {
       // Si el worker falla, se calcula en el hilo principal como respaldo.
       worker.terminate()
-      if (cancelled) return
-      const result = runBacktest(closed, sensitivity, OPTS)
-      finish(result, calibrate(result.outcomes))
+      if (!cancelled) runSync()
     }
     worker.postMessage({ candles: closed, sensitivity, opts: OPTS })
     return () => {

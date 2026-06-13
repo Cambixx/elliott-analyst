@@ -1,6 +1,27 @@
+# Configuración de despliegue en Netlify.
+# Con el repo conectado (Git de Netlify), cada push a `main` ejecuta este build
+# y publica `dist/` automáticamente. También sirve para deploys por arrastrar la carpeta.
+
 [build]
-  command = "npm run build"
+  command = "npm run build"   # tsc -b && vite build
   publish = "dist"
 
-# Las reglas de proxy/redirect están en public/_redirects para que también
+[build.environment]
+  # Fijamos la versión de Node para que el build de Netlify sea reproducible
+  # (Node 20 LTS, soportado por Netlify; evita sorpresas si su default cambia).
+  NODE_VERSION = "20"
+
+# Cabeceras de caché: los assets con hash en el nombre son inmutables; el HTML no
+# debe cachearse para que cada deploy se vea al instante.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# Las reglas de redirect (fallback SPA) están en public/_redirects para que también
 # funcionen en despliegues por arrastrar la carpeta dist (acaban dentro de dist/).

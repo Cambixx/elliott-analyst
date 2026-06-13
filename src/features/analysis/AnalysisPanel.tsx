@@ -142,6 +142,7 @@ function ScenarioCard({
   bias,
   focused,
   calibration,
+  lastPrice,
   onSelect,
 }: {
   scenario: Scenario
@@ -149,6 +150,7 @@ function ScenarioCard({
   bias: Bias
   focused: boolean
   calibration?: Calibration | null
+  lastPrice?: number | null
   onSelect?: (id: string) => void
 }) {
   const meta = PATTERN_META[scenario.pattern]
@@ -226,6 +228,25 @@ function ScenarioCard({
           en desarrollo · puede repintar
         </span>
       )}
+
+      {/* Pronóstico explícito de continuación para ondas en desarrollo (lo accionable).
+          Solo si el borde cercano del objetivo sigue POR DELANTE del precio (aún hay
+          recorrido); si el precio ya entró en la zona, el pronóstico ya se consumió. */}
+      {scenario.developing &&
+        scenario.target &&
+        tradeBias !== 'vigilar' &&
+        (lastPrice == null ||
+          (tradeBias === 'compra'
+            ? scenario.target.low > lastPrice
+            : scenario.target.high < lastPrice)) && (
+          <p className="mt-1.5 rounded border border-amber-700/40 bg-amber-950/20 px-2 py-1 text-[11px] leading-relaxed text-amber-200/90">
+            <span className="font-semibold">Pronóstico:</span> continuación{' '}
+            {tradeBias === 'compra' ? 'al alza' : 'a la baja'} hacia{' '}
+            {fmtZone(scenario.target.low)}–{fmtZone(scenario.target.high)}; se invalida si pierde{' '}
+            {fmtZone(scenario.invalidation.price)}.{' '}
+            <span className="text-amber-300/70">Mayor incertidumbre: la onda aún puede repintar.</span>
+          </p>
+        )}
 
       <div className="mt-1.5 text-[11px]">
         {align === 'favor' && (
@@ -313,21 +334,47 @@ function ScenarioCard({
 
 /** Panel de fiabilidad histórica del propio motor sobre el par/TF actual. */
 function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
-  const { result, calibration } = insight
+  const { result, calibration, developingCalibration } = insight
   const pct = calibration.hitRate != null ? Math.round(calibration.hitRate * 100) : null
+  const devPct = developingCalibration.hitRate != null ? Math.round(developingCalibration.hitRate * 100) : null
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
           Fiabilidad histórica del motor
         </span>
-        <span className="ml-auto font-mono text-xs text-slate-400">{result.resolved} casos</span>
       </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
-        En este par/temporalidad, los conteos <strong className="text-slate-300">confirmados</strong>{' '}
-        del motor alcanzaron su zona objetivo antes que la invalidación{' '}
-        {pct != null && <strong className="text-slate-200">{pct}% de las veces</strong>} (
-        {calibration.hits}/{result.resolved}).
+
+      {/* Pronósticos en desarrollo: lo que más interesa operar (continuación). */}
+      {result.developingResolved > 0 && (
+        <div className="mt-1.5 rounded border border-amber-700/40 bg-amber-950/20 p-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+              Pronósticos en desarrollo
+            </span>
+            <span className="ml-auto font-mono text-[11px] text-slate-400">
+              {result.developingResolved} casos
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+            Los pronósticos de <strong className="text-amber-200">continuación</strong> (onda en curso
+            hacia su objetivo) lo alcanzaron antes que la invalidación{' '}
+            {devPct != null && <strong className="text-amber-200">{devPct}% de las veces</strong>} (
+            {developingCalibration.hits}/{result.developingResolved}). Más útiles para operar, pero más
+            inciertos: la onda aún puede repintar.
+          </p>
+        </div>
+      )}
+
+      <p className="mt-2 text-xs leading-relaxed text-slate-400">
+        Conteos <strong className="text-slate-300">confirmados</strong> (ya completados):
+        alcanzaron su zona objetivo antes que la invalidación{' '}
+        {pct != null ? (
+          <strong className="text-slate-200">{pct}% de las veces</strong>
+        ) : (
+          'sin casos suficientes'
+        )}{' '}
+        {result.resolved > 0 && `(${calibration.hits}/${result.resolved})`}.
       </p>
       <div className="mt-2 space-y-1">
         {calibration.buckets
@@ -446,6 +493,7 @@ export function AnalysisPanel({
             bias={higher.bias}
             focused={focusedId === s.id}
             calibration={backtest?.calibration}
+            lastPrice={lastPrice}
             onSelect={onSelect}
           />
         ))
@@ -461,7 +509,12 @@ export function AnalysisPanel({
       )}
 
       {scenarios.length > 0 && (
-        <RiskCalculatorCard scenario={scenarios[0]} price={lastPrice} />
+        // Si hay un escenario aislado, la calculadora lo usa (permite ver el plan de
+        // un pronóstico en desarrollo concreto); si no, el primario.
+        <RiskCalculatorCard
+          scenario={scenarios.find((s) => s.id === focusedId) ?? scenarios[0]}
+          price={lastPrice}
+        />
       )}
 
       <div className="mt-auto rounded-lg border border-amber-700/40 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-200/90">

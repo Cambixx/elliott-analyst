@@ -14,21 +14,19 @@ const CONF_RANK: Record<Confidence, number> = { baja: 0, media: 1, alta: 2 }
 
 /**
  * Sesgo direccional honesto de un escenario (no es una orden):
- *  - Impulso completado → la tendencia se agota → posible giro (compra si era bajista, venta si alcista).
- *  - Diagonal final → reversión rápida → contraria a su dirección.
- *  - Impulso en desarrollo (onda 5) o triángulo → "vigilar" (aún sin definir).
- *  - Corrección ABC completándose → se reanuda la tendencia previa (contraria a la corrección).
+ *  - EN DESARROLLO (onda 5/C/Y en curso) → sesgo de CONTINUACIÓN hacia su objetivo
+ *    proyectado, en el mismo sentido de la onda (es el pronóstico operable, aunque
+ *    más incierto: la estructura puede repintar). Compra si sube, venta si baja.
+ *  - COMPLETADO → posible giro/reanudación, contrario a la dirección de la onda:
+ *    impulso/diagonal completado al alza → venta; corrección a la baja completada → compra.
+ *  - Triángulo → "vigilar" (la dirección la define la ruptura, aún sin definir).
  */
 export function scenarioBias(s: Scenario): Bias {
-  if (s.kind === 'impulse') {
-    // Onda 5 en desarrollo → sin sesgo accionable todavía (también en diagonales:
-    // apostar a la reversión antes de que la estructura se complete es prematuro).
-    if (s.developing) return 'vigilar'
-    if (s.pattern === 'diagonal') return s.direction === 'up' ? 'venta' : 'compra'
-    return s.direction === 'up' ? 'venta' : 'compra'
-  }
   if (s.pattern === 'triangulo') return 'vigilar'
-  return s.direction === 'down' ? 'compra' : 'venta'
+  // En desarrollo: continuación en el sentido de la propia onda (hacia su objetivo).
+  if (s.developing) return s.direction === 'up' ? 'compra' : 'venta'
+  // Completado: giro (impulso/diagonal) o reanudación (corrección), contrario a la dirección.
+  return s.direction === 'up' ? 'venta' : 'compra'
 }
 
 /**

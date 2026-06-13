@@ -43,15 +43,23 @@ export function computeRiskPlan(
 
   const long = bias === 'compra'
 
-  // Stop según el tipo de escenario:
-  //  - Impulso/diagonal completado: la invalidación (más allá de la onda 5) ya es
+  // Stop según el tipo de operativa:
+  //  - EN DESARROLLO (continuación hacia el objetivo): la invalidación de la onda
+  //    en curso es el stop natural (perder ese nivel mata el pronóstico).
+  //  - Impulso/diagonal COMPLETADO: la invalidación (más allá de la onda 5) ya es
   //    el stop natural del trade contrario.
-  //  - Corrección (zigzag/flat): la invalidación del CONTEO es el origen (lado
-  //    contrario), pero el stop del TRADE de reanudación es el extremo de la
-  //    onda C — si el precio lo supera, la corrección sigue y la tesis muere.
+  //  - Corrección COMPLETADA (zigzag/flat): el stop del trade de reanudación es el
+  //    extremo de la onda C — si el precio lo supera, la corrección sigue.
   let stop: number
   let stopLabel: string
-  if (scenario.kind === 'impulse') {
+  if (scenario.developing) {
+    // Continuación: el stop es la invalidación de la onda en curso, que el motor
+    // ya fija en el extremo de la onda previa (onda 4 en un impulso, onda B en una
+    // corrección…). Coincide con la línea de invalidación del gráfico y con la
+    // pista de backtest → mismo nivel en todas las superficies.
+    stop = scenario.invalidation.price
+    stopLabel = 'invalidación de la onda en curso'
+  } else if (scenario.kind === 'impulse') {
     stop = scenario.invalidation.price
     stopLabel = 'invalidación'
   } else {
@@ -80,6 +88,11 @@ export function computeRiskPlan(
     targetFar = long ? scenario.target.high : scenario.target.low
   } else if (scenario.kind === 'correction') {
     targetNear = scenario.pivots[0].price
+  }
+  if (targetNear != null && targetNear <= 0) {
+    // Precio imposible (zona degenerada en pares baratos): no es un objetivo válido.
+    targetNear = null
+    targetFar = null
   }
   if (targetNear != null) {
     const rewardDist = long ? targetNear - price : price - targetNear

@@ -242,6 +242,14 @@ export function AlertsCard({
                   <span className="text-[11px] font-semibold text-slate-200">
                     {a.base}/USDC · {a.timeframe}
                   </span>
+                  {a.developing && (
+                    <span
+                      title="Pronóstico de continuación de una onda en desarrollo: más útil pero más incierto, puede repintar."
+                      className="rounded border border-amber-600/40 bg-amber-950/30 px-1 py-0.5 text-[9px] text-amber-300"
+                    >
+                      en desarrollo
+                    </span>
+                  )}
                   <span className="ml-auto text-[10px] text-slate-500">{relTime(a.ts)}</span>
                 </div>
                 <p className="mt-0.5 text-[10px] leading-snug text-slate-400">

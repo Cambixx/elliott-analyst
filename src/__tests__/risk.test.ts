@@ -85,6 +85,32 @@ describe('computeRiskPlan', () => {
     expect(plan!.warnings.some((w) => w.includes('apalancamiento'))).toBe(true)
   })
 
+  it('onda 5 en desarrollo (continuación alcista): plan largo con stop en la invalidación', () => {
+    const dev = mkScenario({
+      kind: 'impulse',
+      pattern: 'impulso',
+      direction: 'up',
+      developing: true,
+      invalidation: { price: 90, reason: '' }, // onda 4, por debajo
+      target: { label: 'Zona objetivo onda 5', low: 120, high: 140 },
+      pivots: [
+        mkPivot(0, 80, 'low'),
+        mkPivot(10, 110, 'high'),
+        mkPivot(20, 95, 'low'),
+        mkPivot(30, 150, 'high'),
+        mkPivot(40, 90, 'low'),
+        mkPivot(50, 105, 'high', false), // onda 5 en curso (sin confirmar)
+      ],
+    })
+    const plan = computeRiskPlan(dev, 100, 1000, 1)
+    expect(plan).not.toBeNull()
+    expect(plan!.bias).toBe('compra') // continuación al alza
+    expect(plan!.stop).toBe(90) // invalidación (onda 4)
+    expect(plan!.stopLabel).toContain('onda en curso')
+    expect(plan!.targetNear).toBe(120) // borde cercano de la zona de la onda 5
+    expect(plan!.rr).toBeCloseTo(2) // (120−100)/(100−90)
+  })
+
   it('entradas inválidas → null', () => {
     expect(computeRiskPlan(bearishImpulseDone(), 0, 1000, 1)).toBeNull()
     expect(computeRiskPlan(bearishImpulseDone(), 100, 0, 1)).toBeNull()

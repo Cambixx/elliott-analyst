@@ -22,9 +22,14 @@ export interface Outcome {
 }
 
 export interface BacktestResult {
+  /** Desenlaces de conteos CONFIRMADOS (impulso/diagonal completados). */
   outcomes: Outcome[]
-  /** Conteos confirmados y resueltos dentro del horizonte. */
+  /** Conteos confirmados resueltos dentro del horizonte. */
   resolved: number
+  /** Desenlaces de PRONÓSTICOS EN DESARROLLO (continuación hacia el objetivo de la onda en curso). */
+  developingOutcomes: Outcome[]
+  /** Pronósticos en desarrollo resueltos dentro del horizonte. */
+  developingResolved: number
   /** Puntos de evaluación recorridos. */
   evaluated: number
   /** Paso de muestreo usado (1 = cada vela). */
@@ -86,8 +91,10 @@ export interface BacktestOptions {
  * del conteo (¿llega a su zona objetivo antes que a la invalidación?), NO la
  * rentabilidad de una operación (no incluye costes ni gestión).
  *
- * Solo evalúa conteos COMPLETOS y CONFIRMADOS (los `developing` repintan).
- * Deduplica por id para no contar el mismo conteo en velas consecutivas.
+ * Evalúa DOS pistas: (A) conteos confirmados (impulso/diagonal completados) y
+ * (B) pronósticos de continuación de ondas EN DESARROLLO. Deduplica cada conteo
+ * (los confirmados por id; los developing por identidad estable patrón+dir+origen,
+ * porque su id lleva el pivote en curso que se mueve cada vela).
  */
 export function runBacktest(
   candles: Candle[],
@@ -100,14 +107,26 @@ export function runBacktest(
 
   const closed = candles.filter((c) => c.closed)
   const n = closed.length
-  const empty: BacktestResult = { outcomes: [], resolved: 0, evaluated: 0, step: 0 }
+  const empty: BacktestResult = {
+    outcomes: [],
+    resolved: 0,
+    developingOutcomes: [],
+    developingResolved: 0,
+    evaluated: 0,
+    step: 0,
+  }
   if (n < warmup + horizon + 10) return empty
 
   const span = n - horizon - warmup
   const step = Math.max(1, Math.ceil(span / maxEvaluations))
   const outcomes: Outcome[] = []
+  const developingOutcomes: Outcome[] = []
   const seen = new Set<string>()
+  const seenDev = new Set<string>()
   let evaluated = 0
+
+  const metKeysOf = (sc: { confluence: { factors: { met: boolean; key: string }[] } }) =>
+    sc.confluence.factors.filter((f) => f.met).map((f) => f.key)
 
   const kList = degreeList(sensitivity)
   for (let t = warmup; t < n - horizon; t += step) {
@@ -115,26 +134,48 @@ export function runBacktest(
     // Mismo pipeline multi-grado que la UI en vivo → la calibración mide los
     // MISMOS scores que verá el usuario (no un detector single-k distinto).
     const { scenarios } = detectScenariosMultiDegree(prefix, kList)
-    // Mejor conteo CONFIRMADO con objetivo direccional limpio (impulso/diagonal
-    // completados). Los triángulos proyectan a ambos lados (sin sesgo); las
-    // correcciones ABC y las dobles W-X-Y completadas no llevan target propio
-    // (su reanudación apunta al origen) → quedan fuera por el filtro `x.target`.
-    const s = scenarios.find(
-      (x) => !x.developing && x.target && x.pattern !== 'triangulo' && x.pattern !== 'wxy',
-    )
-    if (!s || !s.target) continue
-    if (seen.has(s.id)) continue
-    seen.add(s.id)
-    evaluated++
-
     const entry = prefix[prefix.length - 1].close
     const future = closed.slice(t + 1, t + 1 + horizon) // SOLO el futuro
-    const res = firstPassage(entry, s.target, s.invalidation.price, future)
-    if (res) {
-      const metKeys = s.confluence.factors.filter((f) => f.met).map((f) => f.key)
-      outcomes.push({ score: s.score, hit: res.hit, bars: res.bars, metKeys })
+    evaluated++
+
+    // (A) Mejor conteo CONFIRMADO con objetivo direccional limpio (impulso/diagonal
+    // completados). Triángulos a ambos lados; ABC/WXY completados no llevan target.
+    const conf = scenarios.find(
+      (x) => !x.developing && x.target && x.pattern !== 'triangulo' && x.pattern !== 'wxy',
+    )
+    if (conf?.target && !seen.has(conf.id)) {
+      seen.add(conf.id)
+      const res = firstPassage(entry, conf.target, conf.invalidation.price, future)
+      if (res) outcomes.push({ score: conf.score, hit: res.hit, bars: res.bars, metKeys: metKeysOf(conf) })
+    }
+
+    // (B) Mejor PRONÓSTICO EN DESARROLLO con objetivo de continuación (la onda en
+    // curso hacia su objetivo, invalidación al lado opuesto). Mide EXACTAMENTE la
+    // utilidad de los pronósticos en desarrollo, que es lo que más interesa operar.
+    const dev = scenarios.find((x) => x.developing && x.target && x.pattern !== 'triangulo')
+    if (dev?.target) {
+      // Dedup por identidad ESTABLE de la onda (patrón+dir+origen): el id incluye
+      // el pivote en curso que se mueve cada vela, así que el id NO deduplica el
+      // mismo pronóstico evaluado en barras consecutivas.
+      const devKey = `${dev.pattern}-${dev.direction}-${dev.pivots[0].index}`
+      // Solo se cuenta si el objetivo está POR DELANTE del precio (aún hay recorrido):
+      // si el precio ya está dentro de la zona, el conteo no mide "llegar al objetivo".
+      const inZone = entry >= dev.target.low && entry <= dev.target.high
+      if (!seenDev.has(devKey) && !inZone) {
+        seenDev.add(devKey)
+        const res = firstPassage(entry, dev.target, dev.invalidation.price, future)
+        if (res)
+          developingOutcomes.push({ score: dev.score, hit: res.hit, bars: res.bars, metKeys: metKeysOf(dev) })
+      }
     }
   }
 
-  return { outcomes, resolved: outcomes.length, evaluated, step }
+  return {
+    outcomes,
+    resolved: outcomes.length,
+    developingOutcomes,
+    developingResolved: developingOutcomes.length,
+    evaluated,
+    step,
+  }
 }

@@ -81,11 +81,14 @@ export function useAlertMonitor() {
             reason: opp.reason,
             score: primary.score,
             ts: Date.now(),
+            developing: primary.developing,
           }
           useAlertsStore.getState().pushAlert(alert)
           pushed++
+          // Las ondas en desarrollo son pronósticos de continuación, más inciertos.
+          const devMark = primary.developing ? ' · en desarrollo (puede repintar)' : ''
           sendNotification(
-            `${BIAS_EMOJI[opp.bias]} ${base}/USDC ${alertTimeframe} · ${opp.bias.toUpperCase()}`,
+            `${BIAS_EMOJI[opp.bias]} ${base}/USDC ${alertTimeframe} · ${opp.bias.toUpperCase()}${devMark}`,
             `${primary.title} — ${opp.reason}. Entra a analizar.`,
           )
         } catch {

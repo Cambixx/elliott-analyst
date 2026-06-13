@@ -48,6 +48,8 @@ Documento de research y arquitectura completo: [`RESEARCH-ELLIOTT-Y-ARQUITECTURA
 - [x] **Combinaciones correctivas dobles W-X-Y** (`scoreWxy`/`buildWxy` en detector.ts): detecta dobles three (dos correcciones unidas por una onda X conectora, 8 pivotes) reutilizando `scoreAbc`; compite como correctiva, con descuento por ambigüedad y aviso. Se dibuja con etiquetas a-b-W-X-a-b-Y y se excluye del backtest por ser demasiado ambigua
 - [x] **Multi-grado enlazado** (factor de confluencia "subondas coherentes"): valida que la onda 3 subdivide en ~5 sub-swings y las ondas 2/4 en ~3, a un grado más fino derivado de la propia amplitud de la onda. Factor **suave** (no filtro), neutral si faltan datos; no aplica a diagonales (3-3-3-3-3)
 - [x] **Transparencia de factores** (`calibration.ts` factorStats): el backtest registra qué factores de confluencia acompañan a los aciertos y el panel muestra su tasa observada con su N. Decisión honesta: NO se repesan dinámicamente los factores (con ~15 muestras por par el lift es ruidoso); se **muestra el dato observado** en vez de fingir una calibración precisa
+- [x] **Pronósticos de ondas EN DESARROLLO** (lo más accionable): una onda en curso (5/C/Y) recibe **sesgo de continuación** hacia su objetivo (no "vigilar"), con **plan de gestión de riesgo** (stop = extremo de la onda previa, objetivo = zona proyectada), línea de **pronóstico explícita** en su tarjeta, y puede disparar **alertas**. Siempre marcado como "en desarrollo · puede repintar / mayor incertidumbre". La calculadora usa el escenario aislado si clicas uno
+- [x] **Fiabilidad de pronósticos en desarrollo** (pista de backtest aparte): mide cuántas veces el pronóstico de continuación alcanzó su objetivo antes que la invalidación — la métrica que de verdad importa para operar ondas en curso (honestamente, suele ser menor que la de conteos confirmados)
 - [ ] **Fase 3+ (futuro):** sub-conteo enlazado completo (etiquetar subondas en el gráfico), combinaciones triples WXYXZ, pesos calibrados con acumulación cross-par/sesión
 
 ### Móvil / instalación en el teléfono
@@ -124,6 +126,24 @@ permite CORS: `Access-Control-Allow-Origin: *`). No hace falta proxy ni backend.
 
 Cualquier hosting estático sirve (Netlify, Vercel, Cloudflare Pages, GitHub Pages…):
 `npm run build` y publica `dist/`. No se necesita ninguna variable de entorno ni proxy.
+
+### Despliegue automático en Netlify (push a `main` → deploy)
+
+El proyecto ya trae la configuración en [`netlify.toml`](./netlify.toml) (build `npm run build`,
+publish `dist/`, Node 20, cabeceras de caché) y el fallback SPA en [`public/_redirects`](./public/_redirects).
+Para que cada push a `main` despliegue solo, hay que **conectar el repositorio una vez** en Netlify:
+
+1. En Netlify: **Add new site → Import an existing project** (o, si ya tienes el sitio creado a mano,
+   **Site configuration → Build & deploy → Continuous deployment → Link repository**).
+2. Elige **GitHub** y autoriza el acceso al repo `Cambixx/elliott-analyst`.
+3. Netlify detecta `netlify.toml`, así que el **build command** (`npm run build`) y el **publish
+   directory** (`dist`) ya vienen rellenos. Branch a desplegar: **`main`**. Pulsa **Deploy**.
+4. A partir de ahí: cada `git push` a `main` lanza un build y publica automáticamente. Las pull
+   requests generan **Deploy Previews** (una URL por PR) sin tocar producción.
+
+> Variables de entorno opcionales (Netlify → Site configuration → Environment variables): ninguna es
+> necesaria. `VITE_COINGECKO_KEY` (clave Demo de CoinGecko) solo sube los límites de esa API;
+> `VITE_BINANCE_PROXY` solo si en tu red el acceso directo a Binance fallara.
 
 > **Importante — por qué NO se usa un proxy de servidor:** Binance responde **403** a las
 > peticiones que vienen de IPs de datacenter/algunas regiones (p.ej. los servidores de

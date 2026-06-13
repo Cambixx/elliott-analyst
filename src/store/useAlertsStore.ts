@@ -12,6 +12,8 @@ export interface Alert {
   reason: string
   score: number
   ts: number
+  /** true si el conteo está en desarrollo (pronóstico de continuación, puede repintar). */
+  developing?: boolean
 }
 
 interface AlertsState {

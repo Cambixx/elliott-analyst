@@ -106,6 +106,20 @@ describe('zona objetivo de la onda 5 en desarrollo', () => {
  * origen por construcción, así que "superar el origen" no puede ser la
  * invalidación: debe situarse en el extremo de la onda B.
  */
+describe('corrección ABC en desarrollo (continuación de la onda C)', () => {
+  it('lleva zona objetivo de C e invalidación en el extremo de la onda B (no el origen)', () => {
+    // Zigzag bajista con la onda C aún formándose (sin vela posterior que confirme).
+    const candles = candlesFromPath([100, 80, 90, 70], 6)
+    const { scenarios } = detectScenarios(candles, 1.6)
+    const abc = scenarios.find((s) => s.pattern === 'zigzag' && s.developing)
+    expect(abc).toBeDefined()
+    expect(abc!.target).toBeDefined() // zona objetivo de C (continuación)
+    // Invalidación = extremo de la onda B (p[2] ≈ 90), no el origen (100).
+    expect(abc!.invalidation.price).toBeCloseTo(90, 0)
+    expect(abc!.invalidation.reason).toContain('onda B')
+  })
+})
+
 describe('plana expandida', () => {
   it('la invalidación se sitúa en el extremo de B, no en el origen ya superado', () => {
     // A: 100→80 (20 abajo) · B: 80→103 (bRet = 1.15, expandida) · C: 103→85.

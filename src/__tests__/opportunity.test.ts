@@ -41,11 +41,10 @@ describe('deriveOpportunity con triángulos', () => {
 })
 
 /**
- * Regresión (hallazgo de auditoría): la diagonal en desarrollo recibía sesgo
- * accionable (venta/compra) mientras un impulso idéntico en desarrollo recibía
- * 'vigilar'. Apostar a la reversión antes de completarse es prematuro.
+ * Sesgo según fase: en DESARROLLO se opera la CONTINUACIÓN hacia el objetivo (en el
+ * sentido de la onda); COMPLETADO se opera el giro/reanudación (sentido contrario).
  */
-describe('scenarioBias con diagonales', () => {
+describe('scenarioBias por fase (desarrollo vs completado)', () => {
   const base = {
     kind: 'impulse' as const,
     pattern: 'diagonal' as const,
@@ -53,11 +52,44 @@ describe('scenarioBias con diagonales', () => {
     pivots: [mkPivot(0, 100, 'low'), mkPivot(10, 120, 'high')],
   }
 
-  it('diagonal en desarrollo → vigilar (sin sesgo prematuro)', () => {
-    expect(scenarioBias(mkScenario({ ...base, developing: true }))).toBe('vigilar')
+  it('en desarrollo (alcista) → compra (continuación hacia el objetivo)', () => {
+    expect(scenarioBias(mkScenario({ ...base, developing: true }))).toBe('compra')
   })
 
-  it('diagonal completada → sesgo de reversión', () => {
+  it('completada (alcista) → venta (reversión tras completarse)', () => {
     expect(scenarioBias(mkScenario({ ...base, developing: false }))).toBe('venta')
+  })
+
+  it('impulso en desarrollo bajista → venta (continuación a la baja)', () => {
+    const imp = {
+      kind: 'impulse' as const,
+      pattern: 'impulso' as const,
+      direction: 'down' as const,
+      developing: true,
+      pivots: [mkPivot(0, 120, 'high'), mkPivot(10, 100, 'low')],
+    }
+    expect(scenarioBias(mkScenario(imp))).toBe('venta')
+  })
+
+  it('corrección ABC en desarrollo bajista → venta (continuación de la corrección)', () => {
+    const abc = {
+      kind: 'correction' as const,
+      pattern: 'zigzag' as const,
+      direction: 'down' as const,
+      developing: true,
+      pivots: [mkPivot(0, 120, 'high'), mkPivot(10, 100, 'low'), mkPivot(20, 110, 'high'), mkPivot(30, 95, 'low', false)],
+    }
+    expect(scenarioBias(mkScenario(abc))).toBe('venta')
+  })
+
+  it('triángulo siempre → vigilar (en desarrollo o no)', () => {
+    const tri = {
+      kind: 'correction' as const,
+      pattern: 'triangulo' as const,
+      direction: 'up' as const,
+      pivots: [mkPivot(0, 100, 'low'), mkPivot(10, 120, 'high')],
+    }
+    expect(scenarioBias(mkScenario({ ...tri, developing: true }))).toBe('vigilar')
+    expect(scenarioBias(mkScenario({ ...tri, developing: false }))).toBe('vigilar')
   })
 })

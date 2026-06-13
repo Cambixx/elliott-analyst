@@ -280,17 +280,37 @@ function buildAbc(
   const warnings: string[] = []
   if (developing) warnings.push('Onda C sin confirmar: puede repintar al llegar nuevas velas.')
 
-  // En una plana expandida la onda B ya superó el origen por construcción, así
-  // que el origen no sirve como invalidación: se usa el extremo de la onda B.
-  const invalidation = expanded
-    ? {
-        price: p[2].price,
-        reason: `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría el conteo de plana expandida.`,
-      }
-    : {
-        price: p[0].price,
-        reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalidaría el conteo ${patternWord}.`,
-      }
+  // Invalidación:
+  //  - EN DESARROLLO (onda C en curso → continuación): el extremo de la onda B es
+  //    el nivel cuya pérdida mata el pronóstico de continuación (y coincide con el
+  //    stop del trade y con la pista de backtest → todo consistente).
+  //  - Completada plana expandida: la onda B ya superó el origen → extremo de B.
+  //  - Completada zigzag/plana: superar el origen invalida el conteo.
+  const invalidation =
+    developing || expanded
+      ? {
+          price: p[2].price,
+          reason: developing
+            ? `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría la continuación de la onda C.`
+            : `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría el conteo de plana expandida.`,
+        }
+      : {
+          price: p[0].price,
+          reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalidaría el conteo ${patternWord}.`,
+        }
+
+  // En desarrollo (onda C en curso) → zona objetivo de CONTINUACIÓN de C (≈ onda A,
+  // 0.618–1.618×A desde el fin de B). Completada → sin target (la reanudación apunta
+  // al origen vía projectionTargets/computeRiskPlan), como antes.
+  let target: PriceZone | undefined
+  if (developing) {
+    const sign = dir === 'up' ? 1 : -1
+    const magA = Math.abs(p[1].price - p[0].price)
+    const a = p[2].price + sign * 0.618 * magA
+    const b = p[2].price + sign * 1.618 * magA
+    const hi = Math.max(a, b)
+    target = hi <= 0 ? undefined : { label: 'Zona objetivo onda C', low: Math.max(Math.min(a, b), 0), high: hi }
+  }
 
   const narrative = isFlat
     ? `Posible corrección ${patternWord} ${dirWord} (3-3-5): la onda B retrocede casi toda la onda A, ` +
@@ -322,6 +342,7 @@ function buildAbc(
     confluence,
     developing,
     invalidation,
+    target,
     narrative,
     warnings,
   }
@@ -382,11 +403,18 @@ function buildWxy(
   const warnings = [...scored.warnings]
   if (developing) warnings.push('Onda Y sin confirmar: puede repintar al llegar nuevas velas.')
 
-  // Superar el origen niega la corrección neta en dir.
-  const invalidation = {
-    price: p[0].price,
-    reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalida la doble W-X-Y.`,
-  }
+  // Invalidación: en desarrollo (onda Y en curso → continuación) el nivel que mata
+  // el pronóstico es el pivote previo (P6); completada, superar el origen niega la
+  // corrección neta. Así el stop del trade y el backtest usan el mismo nivel.
+  const invalidation = developing
+    ? {
+        price: p[6].price,
+        reason: `Perder el nivel previo (${fmt(p[6].price)}) invalidaría la continuación de la onda Y.`,
+      }
+    : {
+        price: p[0].price,
+        reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalida la doble W-X-Y.`,
+      }
 
   const wMag = v(3) - v(0)
   // Solo la versión EN DESARROLLO lleva zona objetivo direccional (la onda Y).
@@ -398,7 +426,8 @@ function buildWxy(
     // Zona objetivo de la onda Y: entre 0.618×W e igualdad con W, medida desde el fin de X (P4).
     const a = p[4].price + sign * 0.618 * wMag
     const b = p[4].price + sign * wMag
-    target = { label: 'Zona objetivo onda Y (≈W)', low: Math.max(Math.min(a, b), 0), high: Math.max(a, b) }
+    const hi = Math.max(a, b)
+    target = hi <= 0 ? undefined : { label: 'Zona objetivo onda Y (≈W)', low: Math.max(Math.min(a, b), 0), high: hi }
   }
 
   // Confluencia macro: W (P0→P3) como "onda A" y X (P3→P4) como "onda B" conectora.
@@ -472,21 +501,34 @@ function buildDiagonal(
   const up = dir === 'up'
   const dirWord = up ? 'alcista' : 'bajista'
   const range = v(5) - v(0)
+  const w3 = v(3) - v(2)
 
   const warnings = [...scored.warnings]
   if (developing) warnings.push('Última onda sin confirmar: puede repintar al llegar nuevas velas.')
 
-  const invalidation = {
-    price: p[5].price,
-    reason: `Superar el extremo de la onda 5 (${fmt(p[5].price)}) cuestiona el fin de la diagonal.`,
-  }
-  // Tras una diagonal final, reversión rápida hacia el inicio de la cuña.
-  const a = p[5].price - sign * 0.618 * range
-  const b = p[5].price - sign * range
-  const target: PriceZone = {
-    label: 'Zona de reversión esperada',
-    low: Math.min(a, b),
-    high: Math.max(a, b),
+  let invalidation: { price: number; reason: string }
+  let target: PriceZone | undefined
+  if (developing) {
+    // Onda 5 de la cuña aún en curso → CONTINUACIÓN hacia el extremo de la diagonal.
+    // En una diagonal w5 < w3, así que se proyecta una zona modesta desde la onda 4.
+    invalidation = {
+      price: p[4].price,
+      reason: `Perder el nivel de la onda 4 (${fmt(p[4].price)}) invalidaría la onda 5 de la diagonal.`,
+    }
+    const a = p[4].price + sign * 0.5 * w3
+    const b = p[4].price + sign * w3
+    const hi = Math.max(a, b)
+    // En desplomes de pares baratos la zona bajista puede salir ≤0: se omite el target.
+    target = hi <= 0 ? undefined : { label: 'Zona objetivo onda 5 (diagonal)', low: Math.max(Math.min(a, b), 0), high: hi }
+  } else {
+    // Diagonal completada → reversión rápida hacia el inicio de la cuña.
+    invalidation = {
+      price: p[5].price,
+      reason: `Superar el extremo de la onda 5 (${fmt(p[5].price)}) cuestiona el fin de la diagonal.`,
+    }
+    const a = p[5].price - sign * 0.618 * range
+    const b = p[5].price - sign * range
+    target = { label: 'Zona de reversión esperada', low: Math.min(a, b), high: Math.max(a, b) }
   }
 
   const narrative =
