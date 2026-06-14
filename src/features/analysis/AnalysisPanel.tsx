@@ -29,6 +29,7 @@ const FACTOR_LABEL: Record<string, string> = {
 import { alignmentWithBias, type HigherContext } from './useHigherTimeframe'
 import type { BacktestInsight } from './useBacktest'
 import { MarketContextCard } from '@/features/market-context/MarketContext'
+import { DerivativesCard } from '@/features/derivatives/DerivativesCard'
 import { RiskCalculatorCard } from './RiskCalculator'
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { maximumFractionDigits: 8 })
@@ -477,6 +478,9 @@ export function AnalysisPanel({
       {alertsSlot}
       <HigherContextCard ctx={higher} />
       <MarketContextCard base={base} referencePrice={closedPrice ?? lastPrice} />
+      {scenarios.length > 0 && (
+        <DerivativesCard base={base} bias={scenarioBias(scenarios[0])} />
+      )}
       {fibZone && <FibZoneCard zone={fibZone} />}
 
       {scenarios.length === 0 ? (
