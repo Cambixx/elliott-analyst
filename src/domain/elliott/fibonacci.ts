@@ -10,7 +10,9 @@
  */
 export function fibScore(observed: number, ideals: readonly number[], sigma?: number): number {
   if (!Number.isFinite(observed)) return 0
-  const s = sigma ?? (ideals.some((i) => Math.abs(i) > 1) ? 0.16 : 0.075)
+  // Umbral >=1: relaciones de extensión/igualdad (incl. la onda 5, cuyo ideal llega
+  // a 1.0) usan la campana ancha; los retrocesos puros (<1) la estrecha.
+  const s = sigma ?? (ideals.some((i) => Math.abs(i) >= 1) ? 0.16 : 0.075)
   const d = Math.min(...ideals.map((i) => Math.abs(observed - i)))
   return Math.exp(-((d / s) ** 2))
 }

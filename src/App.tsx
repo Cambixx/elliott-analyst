@@ -103,10 +103,12 @@ export default function App() {
   // Soportes/resistencias de la estructura (clustering de pivotes del ZigZag),
   // clasificados respecto al precio actual para colorearlos en el gráfico.
   // Proyección hipotética de las ondas que faltan (solo si el toggle está activo).
-  // El impulso naciente se filtra por el sesgo del marco superior dentro de computeForecast.
+  // Se computa sobre lo que REALMENTE se dibuja (drawnScenarios): al aislar un conteo,
+  // la proyección sigue a ese conteo y no al primario global. El impulso naciente se
+  // filtra por el sesgo del marco superior dentro de computeForecast.
   const forecast = useMemo(
-    () => (showForecast ? computeForecast(scenarios, pivots, higher.bias) : null),
-    [showForecast, scenarios, pivots, higher.bias],
+    () => (showForecast ? computeForecast(drawnScenarios, pivots, higher.bias) : null),
+    [showForecast, drawnScenarios, pivots, higher.bias],
   )
 
   const srLevelsRaw = useMemo(() => supportResistance(pivots), [pivots])

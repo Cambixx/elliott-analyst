@@ -77,6 +77,43 @@ describe('forecastFromDeveloping', () => {
     expect(f.ghosts[0].zone).toEqual(s.target)
   })
 
+  it('corrección ABC en desarrollo: C? + reanudación 1? en sentido CONTRARIO a la corrección', () => {
+    // Corrección bajista (A y C bajan); tras C se reanuda al alza → 1? por ENCIMA de C.
+    const down = mkScenario({
+      kind: 'correction',
+      pattern: 'zigzag',
+      direction: 'down',
+      developing: true,
+      target: { label: 'C', low: 60, high: 70 }, // C ≈ 65
+      pivots: [
+        mkPivot(0, 100, 'high'),
+        mkPivot(10, 75, 'low'),
+        mkPivot(20, 88, 'high'),
+        mkPivot(30, 70, 'low', false),
+      ],
+    })
+    const f = forecastFromDeveloping(down)!
+    expect(f.ghosts.map((g) => g.label)).toEqual(['C?', '1?'])
+    const cEnd = f.ghosts[0].price // 65
+    const resume = f.ghosts[1].price
+    expect(resume).toBeGreaterThan(cEnd) // reanudación al alza (contraria a la corrección bajista)
+
+    // Espejo alcista: 1? por DEBAJO de C.
+    const up = mkScenario({
+      ...down,
+      direction: 'up',
+      pivots: [
+        mkPivot(0, 60, 'low'),
+        mkPivot(10, 90, 'high'),
+        mkPivot(20, 72, 'low'),
+        mkPivot(30, 95, 'high', false),
+      ],
+      target: { label: 'C', low: 95, high: 105 },
+    })
+    const fu = forecastFromDeveloping(up)!
+    expect(fu.ghosts[1].price).toBeLessThan(fu.ghosts[0].price)
+  })
+
   it('triángulo o sin target → null', () => {
     const tri = mkScenario({
       kind: 'correction',

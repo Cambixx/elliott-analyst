@@ -63,8 +63,8 @@ export function forecastFromDeveloping(s: Scenario): WaveForecast | null {
     ghosts.push({ label: endLabel, price: waveEnd, zone: s.target })
     if (s.pattern !== 'wxy') {
       const span = Math.abs(waveEnd - origin)
-      // Reanudación contraria a la corrección (sign opuesto).
-      ghosts.push({ label: '1?', price: Math.max(waveEnd + sign * 0.382 * span, 0) })
+      // Reanudación CONTRARIA a la corrección (la tendencia previa se reanuda): sign opuesto.
+      ghosts.push({ label: '1?', price: Math.max(waveEnd - sign * 0.382 * span, 0) })
     }
   }
 
@@ -111,11 +111,13 @@ export function forecastNascentImpulse(pivots: Pivot[]): WaveForecast | null {
   const p5a = p4 + sign * w1
   const p5b = p4 + sign * 0.618 * (w1 + w3)
 
-  const ghosts: GhostWave[] = []
-  if (Math.max(p3lo, p3hi) > 0) ghosts.push({ label: '3?', price: p3star, zone: zone(p3lo, p3hi) })
-  if (p4 > 0) ghosts.push({ label: '4?', price: p4 })
-  if (Math.max(p5a, p5b) > 0)
-    ghosts.push({ label: '5?', price: (p5a + p5b) / 2, zone: zone(p5a, p5b) })
+  const all: GhostWave[] = []
+  if (Math.max(p3lo, p3hi) > 0) all.push({ label: '3?', price: p3star, zone: zone(p3lo, p3hi) })
+  if (p4 > 0) all.push({ label: '4?', price: p4 })
+  all.push({ label: '5?', price: (p5a + p5b) / 2, zone: zone(p5a, p5b) })
+  // Filtra cualquier vértice con precio central ≤0 (en desplomes la 5 puede salir
+  // negativa aunque un borde de su banda sea >0). Coherente con forecastFromDeveloping.
+  const ghosts = all.filter((g) => g.price > 0)
   if (ghosts.length === 0) return null
 
   return {
