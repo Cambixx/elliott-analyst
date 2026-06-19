@@ -54,7 +54,6 @@ export function RiskCalculatorCard({
       target: plan.targetNear,
       plannedRr: plan.rr,
       confidence: scenario.confidence,
-      note: '',
     })
     setSaved(true)
     clearTimeout(savedTimer.current)

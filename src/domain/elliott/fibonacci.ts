@@ -23,6 +23,6 @@ export const FIB_IDEALS = {
   wave3Extension: [1.618, 2.0, 2.618], // 2.0 alinea con la escalera de extensión del detector
   wave4Retrace: [0.236, 0.382, 0.5],
   wave5: [0.618, 1.0],
-  bRetrace: [0.5, 0.618, 0.786],
-  cExtension: [0.618, 1.0, 1.618],
+  // Los ideales de B y C correctivos viven en scoreAbc (detector.ts), donde se adaptan
+  // a la forma detectada (zigzag/plana/plana expandida) en vez de un set genérico.
 } as const

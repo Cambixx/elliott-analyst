@@ -37,7 +37,6 @@ function mk(over: Partial<JournalEntry>): JournalEntry {
     target: 130,
     plannedRr: 3,
     confidence: 'alta',
-    note: '',
     status: 'abierta',
     realizedR: null,
     ...over,

@@ -239,11 +239,13 @@ export function CandleChart({
     }
 
     // Proyección punteada del escenario más probable hacia sus objetivos.
-    // Se omite cuando hay proyección de ondas completas (forecast), que parte del
-    // mismo origen y la incluye, para no duplicar líneas.
+    // Solo se omite cuando el forecast EXTIENDE este mismo primario (source
+    // 'developing'): ahí parte del mismo origen y la incluiría, duplicando líneas.
+    // Un forecast 'nascent' describe otra estructura (un 0-1-2 incipiente), así que
+    // la proyección del primario sigue siendo información independiente y se mantiene.
     const projFrom = scenarios[0]
     const targets = projectionTargets(projFrom)
-    if (targets.length > 0 && !forecast) {
+    if (targets.length > 0 && forecast?.source !== 'developing') {
       const lastPivot = projFrom.pivots[projFrom.pivots.length - 1]
       chart.createOverlay({
         name: 'projectionPath',
@@ -274,8 +276,9 @@ export function CandleChart({
         lock: true,
         points: pts,
         extendData: {
-          // Naciente (más especulativo) en violeta; en desarrollo en gris pizarra.
-          color: forecast.source === 'nascent' ? '#a78bfa' : '#94a3b8',
+          // Naciente (más especulativo) en rosa, distinto de la VWAP (#c084fc) y del
+          // triángulo (#a78bfa) para que no se confunda; en desarrollo, gris pizarra.
+          color: forecast.source === 'nascent' ? '#f472b6' : '#94a3b8',
           labels: forecast.ghosts.map((g) => g.label),
           hasZone: forecast.ghosts.map((g) => !!g.zone),
         } satisfies ForecastExtend,

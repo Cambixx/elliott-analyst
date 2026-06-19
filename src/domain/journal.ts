@@ -24,7 +24,6 @@ export interface JournalEntry {
   plannedRr: number | null
   /** Confianza del conteo al anotar (para análisis posterior). */
   confidence: string
-  note: string
   /** Desenlace. */
   status: TradeStatus
   closedAt?: number

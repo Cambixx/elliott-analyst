@@ -8,7 +8,6 @@ interface JournalState {
   add: (entry: Omit<JournalEntry, 'id' | 'createdAt' | 'status' | 'realizedR'>) => void
   /** Cambia el desenlace; si se cierra con precio de salida, recalcula el R realizado. */
   resolve: (id: string, status: TradeStatus, exitPrice?: number | null) => void
-  updateNote: (id: string, note: string) => void
   remove: (id: string) => void
   clear: () => void
 }
@@ -44,8 +43,6 @@ export const useJournalStore = create<JournalState>()(
             return { ...e, status, exitPrice: px, realizedR, closedAt: Date.now() }
           }),
         })),
-      updateNote: (id, note) =>
-        set((s) => ({ entries: s.entries.map((e) => (e.id === id ? { ...e, note } : e)) })),
       remove: (id) => set((s) => ({ entries: s.entries.filter((e) => e.id !== id) })),
       clear: () => set({ entries: [] }),
     }),
