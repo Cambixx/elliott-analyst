@@ -10,16 +10,19 @@ import type { ProjectionExtend } from './projectionOverlay'
 import type { ChannelExtend } from './channelOverlay'
 import type { VwapExtend } from './vwapOverlay'
 import type { SrExtend, SrItem } from './srOverlay'
+import type { ForecastExtend } from './forecastOverlay'
 import './elliottOverlay' // registra el overlay 'elliottWave'
 import './fibZoneOverlay' // registra el overlay 'fibZone'
 import './projectionOverlay' // registra el overlay 'projectionPath'
 import './channelOverlay' // registra el overlay 'elliottChannel'
 import './vwapOverlay' // registra el overlay 'vwapLine'
 import './srOverlay' // registra el overlay 'srLevels'
+import './forecastOverlay' // registra el overlay 'waveForecast'
 import { formatPrice as fmtPrice } from '@/lib/format'
 import { projectionTargets } from '@/domain/elliott/projection'
 import { channelDrawPoints } from '@/domain/elliott/channel'
 import type { AnchoredVwap } from '@/domain/vwap'
+import type { WaveForecast } from '@/domain/elliott/forecast'
 
 /** Nivel de S/R ya clasificado respecto al precio actual, listo para dibujar. */
 export interface SrDrawItem extends SrItem {
@@ -41,6 +44,8 @@ interface CandleChartProps {
   vwap?: AnchoredVwap | null
   /** Niveles de soporte/resistencia ya clasificados respecto al precio actual. */
   srLevels?: SrDrawItem[]
+  /** Proyección hipotética de las ondas que faltan (null si el toggle está apagado o no aplica). */
+  forecast?: WaveForecast | null
   showRsi: boolean
   showMacd: boolean
 }
@@ -72,6 +77,7 @@ export function CandleChart({
   fibZone,
   vwap,
   srLevels,
+  forecast,
   showRsi,
   showMacd,
 }: CandleChartProps) {
@@ -144,6 +150,11 @@ export function CandleChart({
     // completo del gráfico en cada tick. El color del nivel se fija al redibujar.
     (srLevels && srLevels.length
       ? `#sr:${srLevels.map((l) => l.price.toPrecision(6)).join(',')}`
+      : '') +
+    // CRÍTICO: el forecast debe estar en la firma para que el overlay aparezca/
+    // desaparezca al togglear (mismo patrón que el resto de overlays).
+    (forecast
+      ? `#fc:${forecast.source}:${forecast.ghosts.map((g) => g.price.toPrecision(6)).join(',')}`
       : '')
   useEffect(() => {
     const chart = chartRef.current
@@ -228,9 +239,11 @@ export function CandleChart({
     }
 
     // Proyección punteada del escenario más probable hacia sus objetivos.
+    // Se omite cuando hay proyección de ondas completas (forecast), que parte del
+    // mismo origen y la incluye, para no duplicar líneas.
     const projFrom = scenarios[0]
     const targets = projectionTargets(projFrom)
-    if (targets.length > 0) {
+    if (targets.length > 0 && !forecast) {
       const lastPivot = projFrom.pivots[projFrom.pivots.length - 1]
       chart.createOverlay({
         name: 'projectionPath',
@@ -243,6 +256,29 @@ export function CandleChart({
           color: withAlpha(WAVE_COLOR[projFrom.pattern], '99'),
           labels: targets.map((v) => fmtPrice(v)),
         } satisfies ProjectionExtend,
+      })
+    }
+
+    // Proyección FANTASMA de las ondas que faltan (toggle). Punteada y tenue.
+    // Por cada onda se pasan 3 puntos [centro, low, high] (mismo timestamp del
+    // origen; la X se reparte en píxeles dentro del overlay).
+    if (forecast && forecast.ghosts.length > 0) {
+      const pts = [{ timestamp: forecast.fromTimestamp, value: forecast.fromPrice }]
+      for (const g of forecast.ghosts) {
+        pts.push({ timestamp: forecast.fromTimestamp, value: g.price })
+        pts.push({ timestamp: forecast.fromTimestamp, value: g.zone?.low ?? g.price })
+        pts.push({ timestamp: forecast.fromTimestamp, value: g.zone?.high ?? g.price })
+      }
+      chart.createOverlay({
+        name: 'waveForecast',
+        lock: true,
+        points: pts,
+        extendData: {
+          // Naciente (más especulativo) en violeta; en desarrollo en gris pizarra.
+          color: forecast.source === 'nascent' ? '#a78bfa' : '#94a3b8',
+          labels: forecast.ghosts.map((g) => g.label),
+          hasZone: forecast.ghosts.map((g) => !!g.zone),
+        } satisfies ForecastExtend,
       })
     }
 

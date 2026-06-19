@@ -3,6 +3,7 @@ import type { Confidence, Scenario, ScenarioPattern } from '@/domain/elliott/typ
 import type { Bias } from '@/domain/indicators/trend'
 import type { FibZone } from '@/domain/elliott/fibZone'
 import type { AnchoredVwap } from '@/domain/vwap'
+import type { WaveForecast } from '@/domain/elliott/forecast'
 import { classifyLevel, type SrLevel } from '@/domain/elliott/levels'
 import { waveRelations } from '@/domain/elliott/relations'
 import { scenarioBias, type Bias as TradeBias } from '@/domain/elliott/opportunity'
@@ -509,6 +510,7 @@ export function AnalysisPanel({
   fibZone,
   vwap,
   structureLevels,
+  forecast,
   lastPrice,
   closedPrice,
   focusedId,
@@ -524,6 +526,7 @@ export function AnalysisPanel({
   fibZone?: FibZone | null
   vwap?: AnchoredVwap | null
   structureLevels?: SrLevel[]
+  forecast?: WaveForecast | null
   lastPrice?: number | null
   /** Precio de la última vela cerrada (para el cross-check con CoinGecko). */
   closedPrice?: number | null
@@ -548,6 +551,12 @@ export function AnalysisPanel({
         <DerivativesCard base={base} bias={scenarioBias(scenarios[0])} />
       )}
       <MarketStructureCard vwap={vwap} levels={structureLevels ?? []} price={lastPrice} />
+      {forecast && (
+        <p className="rounded border border-violet-700/40 bg-violet-950/20 px-2 py-1.5 text-[11px] leading-relaxed text-violet-200/90">
+          <span className="font-semibold">Proyección de ondas activa</span> ({forecast.ghosts.map((g) => g.label).join(' · ')}).{' '}
+          {forecast.warnings[0]}
+        </p>
+      )}
       {fibZone && <FibZoneCard zone={fibZone} />}
 
       {scenarios.length === 0 ? (

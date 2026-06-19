@@ -19,6 +19,7 @@ import { DataQualityBadge } from '@/features/analysis/DataQualityBadge'
 import { useBacktest } from '@/features/analysis/useBacktest'
 import { computeFibZone } from '@/domain/elliott/fibZone'
 import { anchoredVwap } from '@/domain/vwap'
+import { computeForecast } from '@/domain/elliott/forecast'
 import { supportResistance, classifyLevel } from '@/domain/elliott/levels'
 import type { SrDrawItem } from '@/features/chart/CandleChart'
 import { formatPrice } from '@/lib/format'
@@ -55,8 +56,10 @@ export default function App() {
     setSensitivity,
     showRsi,
     showMacd,
+    showForecast,
     toggleRsi,
     toggleMacd,
+    toggleForecast,
   } = useMarketStore()
   const { data: candles, isLoading, isError, error } = useKlines(symbol, interval)
   const liveCandle = useLiveCandle(symbol, interval)
@@ -99,6 +102,13 @@ export default function App() {
 
   // Soportes/resistencias de la estructura (clustering de pivotes del ZigZag),
   // clasificados respecto al precio actual para colorearlos en el gráfico.
+  // Proyección hipotética de las ondas que faltan (solo si el toggle está activo).
+  // El impulso naciente se filtra por el sesgo del marco superior dentro de computeForecast.
+  const forecast = useMemo(
+    () => (showForecast ? computeForecast(scenarios, pivots, higher.bias) : null),
+    [showForecast, scenarios, pivots, higher.bias],
+  )
+
   const srLevelsRaw = useMemo(() => supportResistance(pivots), [pivots])
   const srLevels: SrDrawItem[] = useMemo(() => {
     if (lastPrice == null) return []
@@ -140,6 +150,7 @@ export default function App() {
         <div className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 p-0.5">
           <IndicatorToggle label="RSI" active={showRsi} onClick={toggleRsi} />
           <IndicatorToggle label="MACD" active={showMacd} onClick={toggleMacd} />
+          <IndicatorToggle label="Proyección" active={showForecast} onClick={toggleForecast} />
         </div>
 
         <label className="flex items-center gap-2">
@@ -209,6 +220,7 @@ export default function App() {
             fibZone={fibZone}
             vwap={vwap}
             srLevels={srLevels}
+            forecast={forecast}
             showRsi={showRsi}
             showMacd={showMacd}
           />
@@ -223,6 +235,7 @@ export default function App() {
           fibZone={fibZone}
           vwap={vwap}
           structureLevels={srLevelsRaw}
+          forecast={forecast}
           lastPrice={lastPrice}
           closedPrice={closedPrice}
           focusedId={focusedId}
