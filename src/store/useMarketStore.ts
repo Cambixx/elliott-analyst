@@ -9,6 +9,8 @@ interface MarketState {
   sensitivity: number
   showRsi: boolean
   showMacd: boolean
+  /** Proyección hipotética de las ondas que faltan (3?/4?/5?...). Apagado por defecto. */
+  showForecast: boolean
   /** Pares marcados como favoritos (acceso rápido en la barra de favoritos). */
   favorites: string[]
   setSymbol: (symbol: string) => void
@@ -16,6 +18,7 @@ interface MarketState {
   setSensitivity: (sensitivity: number) => void
   toggleRsi: () => void
   toggleMacd: () => void
+  toggleForecast: () => void
   toggleFavorite: (symbol: string) => void
 }
 
@@ -34,12 +37,14 @@ export const useMarketStore = create<MarketState>()(
       sensitivity: 3,
       showRsi: false,
       showMacd: false,
+      showForecast: false,
       favorites: ['BTCUSDC', 'ETHUSDC', 'SOLUSDC', 'BNBUSDC'],
       setSymbol: (symbol) => set({ symbol }),
       setInterval: (interval) => set({ interval }),
       setSensitivity: (sensitivity) => set({ sensitivity }),
       toggleRsi: () => set((s) => ({ showRsi: !s.showRsi })),
       toggleMacd: () => set((s) => ({ showMacd: !s.showMacd })),
+      toggleForecast: () => set((s) => ({ showForecast: !s.showForecast })),
       toggleFavorite: (symbol) =>
         set((s) => ({
           favorites: s.favorites.includes(symbol)
@@ -55,6 +60,7 @@ export const useMarketStore = create<MarketState>()(
         sensitivity: s.sensitivity,
         showRsi: s.showRsi,
         showMacd: s.showMacd,
+        showForecast: s.showForecast,
         favorites: s.favorites,
       }),
     },
