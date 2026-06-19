@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useMarketStore, SENSITIVITY_PRESETS } from '@/store/useMarketStore'
 import { useKlines } from '@/features/chart/useKlines'
 import { useLiveCandle } from '@/features/chart/useLiveCandle'
@@ -13,10 +13,14 @@ import { FearGreedChip } from '@/features/market-context/MarketContext'
 import { useAlertMonitor } from '@/features/alerts/useAlertMonitor'
 import { AlertsBell, AlertsCard } from '@/features/alerts/AlertsUI'
 import { ScannerView } from '@/features/scanner/ScannerView'
+import { JournalView } from '@/features/journal/JournalView'
 import { useDataQuality } from '@/features/analysis/useDataQuality'
 import { DataQualityBadge } from '@/features/analysis/DataQualityBadge'
 import { useBacktest } from '@/features/analysis/useBacktest'
 import { computeFibZone } from '@/domain/elliott/fibZone'
+import { anchoredVwap } from '@/domain/vwap'
+import { supportResistance, classifyLevel } from '@/domain/elliott/levels'
+import type { SrDrawItem } from '@/features/chart/CandleChart'
 import { formatPrice } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
 
@@ -58,12 +62,12 @@ export default function App() {
   const liveCandle = useLiveCandle(symbol, interval)
   const now = useNow()
   const dataQuality = useDataQuality(candles, interval, now)
-  const { scenarios } = useElliott(candles, sensitivity)
+  const { scenarios, pivots } = useElliott(candles, sensitivity)
   const backtest = useBacktest(candles, sensitivity)
   const higher = useHigherTimeframe(symbol, interval, sensitivity)
   const { checkNow, checking } = useAlertMonitor()
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  const [view, setView] = useState<'analysis' | 'scanner'>('analysis')
+  const [view, setView] = useState<'analysis' | 'scanner' | 'journal'>('analysis')
 
   const lastPrice = liveCandle?.close ?? candles?.at(-1)?.close
   // Precio de la última vela CERRADA (para el cross-check con CoinGecko, que es agregado/retardado).
@@ -85,6 +89,26 @@ export default function App() {
     return motive ? computeFibZone(motive, candles) : null
   })()
 
+  // VWAP anclado al origen del conteo que se dibuja (referencia institucional).
+  const closedCandles = candles?.filter((c) => c.closed) ?? []
+  const vwap = (() => {
+    const anchor = drawnScenarios[0]?.pivots[0]?.index
+    if (anchor == null || closedCandles.length < 2) return null
+    return anchoredVwap(closedCandles, anchor)
+  })()
+
+  // Soportes/resistencias de la estructura (clustering de pivotes del ZigZag),
+  // clasificados respecto al precio actual para colorearlos en el gráfico.
+  const srLevelsRaw = useMemo(() => supportResistance(pivots), [pivots])
+  const srLevels: SrDrawItem[] = useMemo(() => {
+    if (lastPrice == null) return []
+    return srLevelsRaw.map((l) => {
+      const kind = classifyLevel(l, lastPrice)
+      const tag = kind === 'soporte' ? 'S' : kind === 'resistencia' ? 'R' : '•'
+      return { price: l.price, kind, label: `${tag} ×${l.touches}` }
+    })
+  }, [srLevelsRaw, lastPrice])
+
   return (
     <div className="flex min-h-dvh flex-col lg:h-screen">
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-slate-800 px-3 py-2 sm:gap-x-4 sm:px-4 sm:py-2.5">
@@ -96,7 +120,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 p-0.5">
-          {(['analysis', 'scanner'] as const).map((v) => (
+          {(['analysis', 'scanner', 'journal'] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
@@ -105,7 +129,7 @@ export default function App() {
                 (view === v ? 'bg-cyan-500 text-slate-900' : 'text-slate-300 hover:bg-slate-700')
               }
             >
-              {v === 'analysis' ? 'Análisis' : 'Escáner'}
+              {v === 'analysis' ? 'Análisis' : v === 'scanner' ? 'Escáner' : 'Diario'}
             </button>
           ))}
         </div>
@@ -163,6 +187,8 @@ export default function App() {
             setView('analysis')
           }}
         />
+      ) : view === 'journal' ? (
+        <JournalView />
       ) : (
         <main className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
           <section className="relative h-[55vh] lg:h-auto lg:min-h-0 lg:flex-1">
@@ -181,6 +207,8 @@ export default function App() {
             liveCandle={liveCandle}
             scenarios={drawnScenarios}
             fibZone={fibZone}
+            vwap={vwap}
+            srLevels={srLevels}
             showRsi={showRsi}
             showMacd={showMacd}
           />
@@ -190,7 +218,11 @@ export default function App() {
           scenarios={scenarios}
           higher={higher}
           base={base}
+          symbol={symbol}
+          timeframe={interval}
           fibZone={fibZone}
+          vwap={vwap}
+          structureLevels={srLevelsRaw}
           lastPrice={lastPrice}
           closedPrice={closedPrice}
           focusedId={focusedId}

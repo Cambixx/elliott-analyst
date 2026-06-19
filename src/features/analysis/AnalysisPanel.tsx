@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import type { Confidence, Scenario, ScenarioPattern } from '@/domain/elliott/types'
 import type { Bias } from '@/domain/indicators/trend'
 import type { FibZone } from '@/domain/elliott/fibZone'
+import type { AnchoredVwap } from '@/domain/vwap'
+import { classifyLevel, type SrLevel } from '@/domain/elliott/levels'
 import { waveRelations } from '@/domain/elliott/relations'
 import { scenarioBias, type Bias as TradeBias } from '@/domain/elliott/opportunity'
 import {
@@ -442,11 +444,71 @@ function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
   )
 }
 
+/** Estructura de mercado: VWAP anclado + soportes/resistencias horizontales. */
+function MarketStructureCard({
+  vwap,
+  levels,
+  price,
+}: {
+  vwap?: AnchoredVwap | null
+  levels: SrLevel[]
+  price?: number | null
+}) {
+  if ((!vwap && levels.length === 0) || price == null) return null
+  const vwapDiff = vwap ? (price - vwap.current) / vwap.current : null
+  // Niveles más fuertes que NO están justo en el precio, ordenados por cercanía.
+  const shown = levels
+    .map((l) => ({ ...l, kind: classifyLevel(l, price) }))
+    .filter((l) => l.kind !== 'en-precio')
+    .sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price))
+    .slice(0, 3)
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+        Estructura de mercado
+      </span>
+      {vwap && vwapDiff != null && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          <span className="text-violet-300">VWAP anclado {fmtZone(vwap.current)}</span> · precio{' '}
+          <strong className={vwapDiff >= 0 ? 'text-green-300' : 'text-red-300'}>
+            {vwapDiff >= 0 ? '+' : ''}
+            {(vwapDiff * 100).toFixed(1)}%
+          </strong>{' '}
+          {vwapDiff >= 0 ? 'por encima' : 'por debajo'} (los{' '}
+          {vwapDiff >= 0 ? 'compradores' : 'vendedores'} dominan desde el origen del conteo).
+        </p>
+      )}
+      {shown.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5 text-[11px]">
+          {shown.map((l) => (
+            <li key={l.price} className="flex items-center gap-2">
+              <span className={l.kind === 'soporte' ? 'text-green-300' : 'text-red-300'}>
+                {l.kind === 'soporte' ? 'Soporte' : 'Resistencia'}
+              </span>
+              <span className="font-mono text-slate-300">{fmtZone(l.price)}</span>
+              <span className="text-slate-500">· tocado {l.touches}×</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+        Niveles donde el precio ha reaccionado y VWAP de las operaciones desde el origen: confluencia,
+        no señal. Si un objetivo o la invalidación coinciden con un nivel, gana relevancia.
+      </p>
+    </div>
+  )
+}
+
 export function AnalysisPanel({
   scenarios,
   higher,
   base,
+  symbol,
+  timeframe,
   fibZone,
+  vwap,
+  structureLevels,
   lastPrice,
   closedPrice,
   focusedId,
@@ -457,7 +519,11 @@ export function AnalysisPanel({
   scenarios: Scenario[]
   higher: HigherContext
   base: string
+  symbol?: string
+  timeframe?: string
   fibZone?: FibZone | null
+  vwap?: AnchoredVwap | null
+  structureLevels?: SrLevel[]
   lastPrice?: number | null
   /** Precio de la última vela cerrada (para el cross-check con CoinGecko). */
   closedPrice?: number | null
@@ -481,6 +547,7 @@ export function AnalysisPanel({
       {scenarios.length > 0 && (
         <DerivativesCard base={base} bias={scenarioBias(scenarios[0])} />
       )}
+      <MarketStructureCard vwap={vwap} levels={structureLevels ?? []} price={lastPrice} />
       {fibZone && <FibZoneCard zone={fibZone} />}
 
       {scenarios.length === 0 ? (
@@ -518,6 +585,8 @@ export function AnalysisPanel({
         <RiskCalculatorCard
           scenario={scenarios.find((s) => s.id === focusedId) ?? scenarios[0]}
           price={lastPrice}
+          symbol={symbol}
+          timeframe={timeframe}
         />
       )}
 

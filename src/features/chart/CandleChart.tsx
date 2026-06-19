@@ -8,13 +8,23 @@ import type { ElliottExtend } from './elliottOverlay'
 import type { FibZoneExtend } from './fibZoneOverlay'
 import type { ProjectionExtend } from './projectionOverlay'
 import type { ChannelExtend } from './channelOverlay'
+import type { VwapExtend } from './vwapOverlay'
+import type { SrExtend, SrItem } from './srOverlay'
 import './elliottOverlay' // registra el overlay 'elliottWave'
 import './fibZoneOverlay' // registra el overlay 'fibZone'
 import './projectionOverlay' // registra el overlay 'projectionPath'
 import './channelOverlay' // registra el overlay 'elliottChannel'
+import './vwapOverlay' // registra el overlay 'vwapLine'
+import './srOverlay' // registra el overlay 'srLevels'
 import { formatPrice as fmtPrice } from '@/lib/format'
 import { projectionTargets } from '@/domain/elliott/projection'
 import { channelDrawPoints } from '@/domain/elliott/channel'
+import type { AnchoredVwap } from '@/domain/vwap'
+
+/** Nivel de S/R ya clasificado respecto al precio actual, listo para dibujar. */
+export interface SrDrawItem extends SrItem {
+  price: number
+}
 
 /** Añade alpha a un color hex #rrggbb → #rrggbbaa. */
 const withAlpha = (hex: string, alpha: string) => hex + alpha
@@ -27,6 +37,10 @@ interface CandleChartProps {
   scenarios: Scenario[]
   /** Zona de retroceso de Fibonacci del impulso completado (si la hay). */
   fibZone?: FibZone | null
+  /** VWAP anclado al origen del conteo primario (si lo hay). */
+  vwap?: AnchoredVwap | null
+  /** Niveles de soporte/resistencia ya clasificados respecto al precio actual. */
+  srLevels?: SrDrawItem[]
   showRsi: boolean
   showMacd: boolean
 }
@@ -56,6 +70,8 @@ export function CandleChart({
   liveCandle,
   scenarios,
   fibZone,
+  vwap,
+  srLevels,
   showRsi,
   showMacd,
 }: CandleChartProps) {
@@ -121,12 +137,41 @@ export function CandleChart({
     scenarios.map(sigOf).join('|') +
     (fibZone
       ? `#fz:${fibZone.fromTs}:${fibZone.bandLow.toPrecision(8)}:${fibZone.bandHigh.toPrecision(8)}:${fibZone.broken}`
+      : '') +
+    (vwap ? `#vw:${vwap.anchorIndex}:${vwap.current.toPrecision(6)}` : '') +
+    // Solo el PRECIO de los niveles entra en la firma, NO su kind: el kind cambia
+    // cada tick al cruzar el precio la banda "en-precio" y forzaría un reborrado
+    // completo del gráfico en cada tick. El color del nivel se fija al redibujar.
+    (srLevels && srLevels.length
+      ? `#sr:${srLevels.map((l) => l.price.toPrecision(6)).join(',')}`
       : '')
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
     chart.removeOverlay() // limpia overlays previos y redibuja
+
+    // Soportes/resistencias horizontales (independientes del conteo de Elliott:
+    // se dibujan aunque no haya escenarios, igual que los muestra el panel).
+    if (srLevels && srLevels.length > 0) {
+      chart.createOverlay({
+        name: 'srLevels',
+        lock: true,
+        points: srLevels.map((l) => ({ timestamp: candles[candles.length - 1]?.timestamp ?? 0, value: l.price })),
+        extendData: { items: srLevels.map((l) => ({ label: l.label, kind: l.kind })) } satisfies SrExtend,
+      })
+    }
+
     if (scenarios.length === 0) return
+
+    // VWAP anclado (polilínea desde el origen del conteo).
+    if (vwap && vwap.points.length >= 2) {
+      chart.createOverlay({
+        name: 'vwapLine',
+        lock: true,
+        points: vwap.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+        extendData: { color: '#c084fc' } satisfies VwapExtend,
+      })
+    }
 
     // Zona de retroceso de Fibonacci (debajo de las ondas).
     if (fibZone) {

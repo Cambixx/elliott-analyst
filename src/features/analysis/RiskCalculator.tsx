@@ -1,6 +1,8 @@
+import { useState, useEffect, useRef } from 'react'
 import type { Scenario } from '@/domain/elliott/types'
 import { computeRiskPlan } from '@/domain/risk'
 import { useRiskStore, RISK_PCT_OPTIONS } from '@/store/useRiskStore'
+import { useJournalStore } from '@/store/useJournalStore'
 import { formatPrice } from '@/lib/format'
 
 const fmtUsd = (n: number) =>
@@ -21,14 +23,43 @@ function rrColor(rr: number): string {
 export function RiskCalculatorCard({
   scenario,
   price,
+  symbol,
+  timeframe,
 }: {
   scenario: Scenario | null
   price: number | null | undefined
+  symbol?: string
+  timeframe?: string
 }) {
   const { capital, riskPct, setCapital, setRiskPct } = useRiskStore()
+  const addToJournal = useJournalStore((s) => s.add)
+  const [saved, setSaved] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(savedTimer.current), []) // limpia el timer al desmontar
 
   const plan =
     scenario && price != null ? computeRiskPlan(scenario, price, capital, riskPct) : null
+
+  const handleSave = () => {
+    if (!plan || !scenario || !symbol) return
+    addToJournal({
+      symbol,
+      base: symbol.replace(/USDC$/, ''),
+      timeframe: timeframe ?? '',
+      pattern: scenario.pattern,
+      bias: plan.bias,
+      developing: scenario.developing,
+      entry: plan.entry,
+      stop: plan.stop,
+      target: plan.targetNear,
+      plannedRr: plan.rr,
+      confidence: scenario.confidence,
+      note: '',
+    })
+    setSaved(true)
+    clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 2500)
+  }
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
@@ -131,6 +162,17 @@ export function RiskCalculatorCard({
                 <li key={i}>{w}</li>
               ))}
             </ul>
+          )}
+
+          {symbol && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saved}
+              className="mt-2 w-full rounded border border-slate-600 bg-slate-700/50 px-2 py-1 text-[11px] font-semibold text-slate-200 transition-colors hover:border-cyan-500 hover:text-cyan-200 disabled:opacity-60"
+            >
+              {saved ? '✓ Anotado en el diario' : '+ Guardar en el diario'}
+            </button>
           )}
 
           <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
