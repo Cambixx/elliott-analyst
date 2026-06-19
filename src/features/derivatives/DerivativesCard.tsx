@@ -123,6 +123,9 @@ export function DerivativesCard({ base, bias }: { base: string; bias: Bias }) {
       <p className={'mt-2 rounded border px-2 py-1 text-[11px] leading-relaxed ' + ALIGN_STYLE[read.alignment]}>
         {read.text}
       </p>
+      <p className="mt-1 text-[10px] leading-snug text-slate-500">
+        Contexto de posicionamiento, no una señal: matiza la probabilidad del escenario, no lo confirma ni lo invalida.
+      </p>
     </div>
   )
 }

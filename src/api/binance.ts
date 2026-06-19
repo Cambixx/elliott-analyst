@@ -76,18 +76,20 @@ export async function fetchKlines(
   const raw = await getJson<RawKline[]>(
     `/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
   )
-  // OJO: el endpoint /klines incluye la vela EN CURSO como último elemento.
-  // Marcarla cerrada introduciría look-ahead (su high/low/close aún cambian),
-  // así que derivamos `closed` del closeTime real (k[6], ms epoch).
+  // OJO: el endpoint /klines devuelve las velas en orden y la EN CURSO es siempre
+  // la ÚLTIMA. Por construcción todas menos la última están cerradas (no dependen
+  // del reloj del cliente); solo la última se decide por su closeTime (k[6]) vs ahora.
+  // Así un reloj adelantado, como mucho, afecta a una sola vela, no a todo el set.
   const now = Date.now()
-  return raw.map((k) => ({
+  const lastIdx = raw.length - 1
+  return raw.map((k, i) => ({
     timestamp: k[0],
     open: +k[1],
     high: +k[2],
     low: +k[3],
     close: +k[4],
     volume: +k[5],
-    closed: k[6] < now,
+    closed: i < lastIdx ? true : k[6] < now,
   }))
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { fetchKlines, fetchTickers, fetchUsdcUniverse, type Ticker } from '@/api/binance'
-import { detectScenarios } from '@/domain/elliott/detector'
+import { detectScenariosMultiDegree } from '@/domain/elliott/detector'
+import { degreeList } from '@/domain/elliott/backtest'
 import { deriveOpportunity, scenarioBias, type Bias } from '@/domain/elliott/opportunity'
 import { useMarketStore } from '@/store/useMarketStore'
 import type { Confidence, Direction, ScenarioKind, ScenarioPattern } from '@/domain/elliott/types'
@@ -64,7 +65,9 @@ export function useScanner() {
             const candles = await fetchKlines(symbol, timeframe, 1000)
             const closed = candles.filter((c) => c.closed)
             if (closed.length >= 50) {
-              const { scenarios } = detectScenarios(closed, sensitivity)
+              // Mismo pipeline multi-grado que el panel: el conteo del escáner coincide
+              // con el que verá el usuario al abrir el par (antes divergían).
+              const { scenarios } = detectScenariosMultiDegree(closed, degreeList(sensitivity))
               const primary = scenarios[0]
               if (primary) {
                 // El precio "actual" sí puede ser el de la vela en curso.
@@ -86,8 +89,10 @@ export function useScanner() {
                 })
               }
             }
-          } catch {
-            /* par concreto falla: seguimos */
+          } catch (err) {
+            // Par concreto falla (incl. 429/418 de rate-limit): seguimos, pero lo dejamos
+            // en consola para que la degradación no sea totalmente silenciosa.
+            console.warn(`escáner: ${symbol} falló`, err)
           } finally {
             setProgress((p) => ({ ...p, done: p.done + 1 }))
           }

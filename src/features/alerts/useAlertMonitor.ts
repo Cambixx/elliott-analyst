@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchKlines } from '@/api/binance'
-import { detectScenarios } from '@/domain/elliott/detector'
+import { detectScenariosMultiDegree } from '@/domain/elliott/detector'
+import { degreeList } from '@/domain/elliott/backtest'
 import { deriveOpportunity, type Bias } from '@/domain/elliott/opportunity'
 import { useMarketStore } from '@/store/useMarketStore'
 import { useAlertsStore, ALERT_COOLDOWN_MS as COOLDOWN_MS, type Alert } from '@/store/useAlertsStore'
@@ -57,7 +58,8 @@ export function useAlertMonitor() {
           // consumidores); el precio "actual" sí puede ser el de la vela en curso.
           const closed = candles.filter((c) => c.closed)
           if (closed.length < 50) continue
-          const { scenarios } = detectScenarios(closed, sensitivity)
+          // Mismo pipeline multi-grado que el panel (las alertas reflejan el conteo real).
+          const { scenarios } = detectScenariosMultiDegree(closed, degreeList(sensitivity))
           const primary = scenarios[0]
           if (!primary) continue
 
@@ -91,8 +93,9 @@ export function useAlertMonitor() {
             `${BIAS_EMOJI[opp.bias]} ${base}/USDC ${alertTimeframe} · ${opp.bias.toUpperCase()}${devMark}`,
             `${primary.title} — ${opp.reason}. Entra a analizar.`,
           )
-        } catch {
-          /* error en un par concreto: seguimos con el resto */
+        } catch (err) {
+          // Par concreto falla (incl. 429/418): seguimos, pero lo registramos.
+          console.warn(`alertas: ${symbol} falló`, err)
         }
       }
       // Si llegaron alertas con la pestaña en segundo plano, avisamos en el título.

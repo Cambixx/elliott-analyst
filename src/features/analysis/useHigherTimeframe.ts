@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchKlines } from '@/api/binance'
 import { higherTimeframe } from '@/domain/timeframe'
 import { trendBias, type Bias } from '@/domain/indicators/trend'
-import { detectScenarios } from '@/domain/elliott/detector'
+import { detectScenariosMultiDegree } from '@/domain/elliott/detector'
+import { degreeList } from '@/domain/elliott/backtest'
 import type { Timeframe } from '@/types/market'
 import type { Direction, Scenario } from '@/domain/elliott/types'
 
@@ -42,7 +43,7 @@ export function useHigherTimeframe(
       return { timeframe: higher, bias: 'mixto', scenario: null, isLoading }
     }
     const bias = trendBias(closed)
-    const { scenarios } = detectScenarios(closed, sensitivity)
+    const { scenarios } = detectScenariosMultiDegree(closed, degreeList(sensitivity))
     return { timeframe: higher, bias, scenario: scenarios[0] ?? null, isLoading }
   }, [data, higher, sensitivity, isLoading])
 }

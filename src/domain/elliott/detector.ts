@@ -251,11 +251,14 @@ function scoreAbc(p: Pivot[], dir: Direction): Scored | null {
   // Permitimos hasta 1.382 para flats expandidos (B supera el inicio de A).
   if (bRet < 0.382 || bRet > 1.382) return null
 
-  // Ideales de C según la FORMA realmente detectada (no una mezcla genérica):
-  // zigzag → C ≈ A ó 1.618×A; flat regular → C ≈ A; flat expandida → C ≈ 1.618×A.
+  // Ideales de C y de B según la FORMA realmente detectada (no una mezcla genérica):
+  // zigzag → B≈0.5-0.786, C≈A ó 1.618×A; flat regular → B≈0.886-1, C≈A;
+  // flat expandida → B>1, C≈1.618×A. Evita infravalorar las planas: una B profunda
+  // es lo correcto en una plana, no un fallo de retroceso, así que su ideal se adapta.
   const cIdeals = bRet > 1.0 ? [1.618] : bRet >= 0.886 ? [1.0] : [1.0, 1.618]
+  const bIdeals = bRet > 1.0 ? [1.0, 1.236, 1.382] : bRet >= 0.886 ? [0.886, 1.0] : [0.5, 0.618, 0.786]
 
-  const fib = (fibScore(bRet, FIB_IDEALS.bRetrace) + fibScore(cRatio, cIdeals)) / 2
+  const fib = (fibScore(bRet, bIdeals) + fibScore(cRatio, cIdeals)) / 2
   const score = Math.round(100 * (0.7 * fib + 0.3))
   return { score, warnings: [] }
 }

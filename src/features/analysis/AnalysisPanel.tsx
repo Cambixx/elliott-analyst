@@ -163,6 +163,9 @@ function ScenarioCard({
   const relations = waveRelations(scenario)
   const tradeBias = scenarioBias(scenario)
   const likelihood = scoreToLikelihood(scenario.score, calibration)
+  // Solo las ondas motrices (impulso/diagonal) proyectan un objetivo hacia delante
+  // comparable con el backtest; las correcciones completadas no tienen objetivo pendiente.
+  const projectsTarget = scenario.pattern === 'impulso' || scenario.pattern === 'diagonal'
   return (
     <div
       onClick={() => onSelect?.(scenario.id)}
@@ -215,6 +218,11 @@ function ScenarioCard({
           // El backtest solo cuenta conteos confirmados; su frecuencia no es
           // comparable con un conteo aún en desarrollo, así que no se muestra.
           <span className="ml-1 text-slate-600">· en desarrollo, sin frecuencia comparable</span>
+        ) : !projectsTarget ? (
+          // La frecuencia del backtest mide si el escenario ALCANZA su objetivo
+          // proyectado tras confirmar. Una corrección ya completada no tiene objetivo
+          // pendiente que medir, así que la frecuencia no aplica (induciría a error).
+          <span className="ml-1 text-slate-600">· estructura completada, sin objetivo pendiente</span>
         ) : likelihood.calibrated && likelihood.frequency ? (
           <span
             title="Frecuencia observada en el backtest del motor (conteos YA confirmados de este par/TF), medida desde la barra de confirmación. No predice el futuro."
@@ -535,6 +543,10 @@ export function AnalysisPanel({
   onSelect?: (id: string) => void
   alertsSlot?: ReactNode
 }) {
+  // El posicionamiento de derivados se contrasta con el escenario que el usuario está
+  // mirando: el aislado si hay uno, o el primario por defecto (antes siempre el primario,
+  // lo que descuadraba la lectura al aislar un alternativo de sesgo contrario).
+  const biasScenario = (focusedId && scenarios.find((s) => s.id === focusedId)) || scenarios[0]
   return (
     <aside className="flex w-full shrink-0 flex-col gap-3 overflow-visible border-t border-slate-800 bg-slate-900/40 p-4 lg:w-96 lg:overflow-y-auto lg:border-l lg:border-t-0">
       <div>
@@ -548,7 +560,7 @@ export function AnalysisPanel({
       <HigherContextCard ctx={higher} />
       <MarketContextCard base={base} referencePrice={closedPrice ?? lastPrice} />
       {scenarios.length > 0 && (
-        <DerivativesCard base={base} bias={scenarioBias(scenarios[0])} />
+        <DerivativesCard base={base} bias={scenarioBias(biasScenario)} />
       )}
       <MarketStructureCard vwap={vwap} levels={structureLevels ?? []} price={lastPrice} />
       {forecast && (

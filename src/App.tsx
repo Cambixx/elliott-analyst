@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useMarketStore, SENSITIVITY_PRESETS } from '@/store/useMarketStore'
 import { useKlines } from '@/features/chart/useKlines'
 import { useLiveCandle } from '@/features/chart/useLiveCandle'
@@ -72,6 +72,13 @@ export default function App() {
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [view, setView] = useState<'analysis' | 'scanner' | 'journal'>('analysis')
 
+  // Los ids de escenario se regeneran al cambiar par/temporalidad/sensibilidad, así que
+  // un escenario "aislado" de la combinación anterior dejaría de existir: limpiamos el
+  // foco para no quedar mostrando una vista general "fantasma" (focused = null pero sin reset).
+  useEffect(() => {
+    setFocusedId(null)
+  }, [symbol, interval, sensitivity])
+
   const lastPrice = liveCandle?.close ?? candles?.at(-1)?.close
   // Precio de la última vela CERRADA (para el cross-check con CoinGecko, que es agregado/retardado).
   const closedPrice = candles?.filter((c) => c.closed).at(-1)?.close
@@ -81,7 +88,8 @@ export default function App() {
   // TODOS los escenarios detectados: el primario (más probable) a plena opacidad
   // y los alternativos atenuados, para ver visualmente los posibles escenarios.
   const focused = focusedId ? (scenarios.find((s) => s.id === focusedId) ?? null) : null
-  const drawnScenarios = focused ? [focused] : scenarios
+  // Estable por contenido: evita que el forecast (useMemo) se recalcule en cada render.
+  const drawnScenarios = useMemo(() => (focused ? [focused] : scenarios), [focused, scenarios])
 
   // Zona de retroceso de Fibonacci del mejor impulso/diagonal ya completado.
   // Se calcula sobre lo que realmente se dibuja: al aislar un escenario que no
