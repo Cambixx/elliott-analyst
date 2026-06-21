@@ -18,15 +18,15 @@ import { weightedMetPct } from '@/domain/elliott/confluence'
 const FACTOR_LABEL: Record<string, string> = {
   estructura: 'Estructura válida',
   macd3: 'Pico MACD en onda 3',
-  div5: 'Divergencia RSI onda 5',
+  div5: 'Divergencia RSI+OBV onda 5',
   rsi3: 'RSI sano en onda 3',
   fib24: 'Fibonacci ondas 2 y 4',
   fibExt: 'Extensión Fibonacci 3/5',
-  vol: 'Volumen máx. onda 3',
+  vol: 'Clímax VSA (giro onda 5)',
   ema: 'EMAs alineadas',
   canal: 'Contenido en canal',
   subondas: 'Subondas coherentes',
-  volB: 'Volumen B < A',
+  volB: 'Clímax VSA (fin de C)',
   rsiC: 'RSI extremo al final de C',
 }
 import { alignmentWithBias, type HigherContext } from './useHigherTimeframe'

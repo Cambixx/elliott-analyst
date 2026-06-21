@@ -2,6 +2,7 @@ import type { Candle } from '@/types/market'
 import { ema } from './ema'
 import { rsi } from './rsi'
 import { macd, type Macd } from './macd'
+import { obv } from './obv'
 
 export interface Indicators {
   rsi: number[]
@@ -9,6 +10,8 @@ export interface Indicators {
   ema20: number[]
   ema50: number[]
   ema200: number[]
+  /** On-Balance Volume acumulado (corrobora/contradice divergencias por volumen). */
+  obv: number[]
 }
 
 /** Calcula los indicadores que usa el score de confluencia, alineados por índice de vela. */
@@ -31,6 +34,7 @@ export function computeIndicators(candles: Candle[]): Indicators {
     ema20: ema(close, 20),
     ema50: ema(close, 50),
     ema200: ema(close, 200),
+    obv: obv(candles),
   }
 }
 

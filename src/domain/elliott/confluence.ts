@@ -1,10 +1,12 @@
 import type { Candle } from '@/types/market'
 import type { Indicators } from '@/domain/indicators'
+import { obvNotConfirming } from '@/domain/indicators/obv'
 import type { ConfluenceFactor, Direction, Pivot } from './types'
 import { fibScore, FIB_IDEALS } from './fibonacci'
 import { impulseChannelContainment } from './channel'
 import { computeATR } from './atr'
 import { zigzag, williamsFilter } from './zigzag'
+import { vsaTurnConfirms } from './vsa'
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x))
 
@@ -86,7 +88,6 @@ export function evaluateImpulseConfluence(
 
   const [lo, hi] = range(idx(0), idx(5))
   const [w3a, w3b] = range(idx(2), idx(3))
-  const [w5a, w5b] = range(idx(4), idx(5))
 
   // 1. Estructura válida (el detector ya filtró las 3 reglas cardinales).
   // Tautológico (siempre true tras el filtro) → peso bajo: no debe inflar el score.
@@ -116,19 +117,27 @@ export function evaluateImpulseConfluence(
     detail: momInW3 ? undefined : 'El mayor histograma MACD no cae en la onda 3.',
   })
 
-  // 3. Divergencia de RSI en la onda 5.
+  // 3. Divergencia de RSI en la onda 5, CORROBORADA por volumen (OBV). La divergencia
+  // de precio/RSI es condición NECESARIA; el OBV solo puede DEBILITARLA (AND): si el
+  // volumen acumulado acompaña al nuevo extremo, no hay agotamiento real. Por construcción
+  // el factor dispara MENOS o IGUAL que antes (nunca más) → no infla la distribución del
+  // score; solo elimina divergencias-RSI puras que el volumen contradice.
   const r3 = ind.rsi[idx(3)]
   const r5 = ind.rsi[idx(5)]
-  let div = false
+  let priceRsiDiv = false
   if (ok(r3) && ok(r5)) {
-    div = up ? p[5].price > p[3].price && r5 < r3 : p[5].price < p[3].price && r5 > r3
+    priceRsiDiv = up ? p[5].price > p[3].price && r5 < r3 : p[5].price < p[3].price && r5 > r3
   }
+  const obvDiverges = obvNotConfirming(ind.obv, idx(3), idx(5), dir)
   factors.push({
     key: 'div5',
-    label: 'Divergencia de RSI en la onda 5',
-    met: div,
+    label: 'Divergencia de RSI en la onda 5 (corroborada por volumen)',
+    met: priceRsiDiv && obvDiverges,
     weight: 1.5, // señal clásica de agotamiento del impulso, muy informativa
-    detail: ok(r3) && ok(r5) ? `RSI onda 3 ${r3.toFixed(0)} → onda 5 ${r5.toFixed(0)}` : undefined,
+    detail:
+      ok(r3) && ok(r5)
+        ? `RSI onda 3 ${r3.toFixed(0)} → onda 5 ${r5.toFixed(0)}; OBV ${obvDiverges ? 'no acompaña la extensión (corrobora)' : 'acompaña el precio (divergencia débil)'}`
+        : undefined,
   })
 
   // 4. RSI coherente durante la onda 3 (>40 en alcista, <60 en bajista).
@@ -163,22 +172,17 @@ export function evaluateImpulseConfluence(
     fibScore(ext3, FIB_IDEALS.wave3Extension) > 0.5 || fibScore(ext5, FIB_IDEALS.wave5) > 0.5
   factors.push({ key: 'fibExt', label: 'Extensión de Fibonacci cumplida (onda 3 o 5)', met: fibExt })
 
-  // 7. Volumen coherente: máximo en la onda 3 y menor en la onda 5.
-  let maxVol = -Infinity
-  let maxVolIdx = -1
-  for (let i = lo; i <= hi; i++) {
-    if (candles[i].volume > maxVol) {
-      maxVol = candles[i].volume
-      maxVolIdx = i
-    }
-  }
-  const volPeakW3 = maxVolIdx >= w3a && maxVolIdx <= w3b
-  const vol5LtVol3 = avgVolume(candles, w5a, w5b) < avgVolume(candles, w3a, w3b)
+  // 7. VSA en el giro (fin de onda 5): clímax/absorción/distribución que confirma el
+  // agotamiento — esfuerzo (volumen en percentil alto) con rechazo del extremo (CLV).
+  // Reemplaza la antigua heurística de volumen por medias/máximos, pobre y sensible a
+  // outliers. El tipo del pivote (high/low) decide la simetría; wick_spike → met=false.
+  const vsa5 = vsaTurnConfirms(candles, p[5])
   factors.push({
     key: 'vol',
-    label: 'Volumen máximo en la onda 3 y menor en la onda 5',
-    met: volPeakW3 && vol5LtVol3,
+    label: 'Clímax/absorción VSA en el giro (fin de onda 5)',
+    met: vsa5.met,
     weight: 1.2,
+    detail: vsa5.detail,
   })
 
   // 8. EMAs alineadas con la dirección del impulso (al final del conteo).
@@ -280,10 +284,11 @@ export function evaluateAbcConfluence(
 
   factors.push({ key: 'estructura', label: 'Estructura ABC coherente (A-B-C)', met: true, weight: 0.3 })
 
-  // Volumen de la onda B menor que el de la onda A (rebote correctivo débil).
-  const volA = avgVolume(candles, idx(0), idx(1))
-  const volB = avgVolume(candles, idx(1), idx(2))
-  factors.push({ key: 'volB', label: 'Volumen de la onda B menor que el de la onda A', met: volB < volA })
+  // VSA en el giro (fin de onda C = p[3]): clímax/absorción que confirma el fin de la
+  // corrección y la reanudación de la tendencia. Reemplaza la heurística "volumen de B <
+  // volumen de A". El tipo del pivote p[3] (high/low) decide la simetría techo/suelo.
+  const vsaC = vsaTurnConfirms(candles, p[3])
+  factors.push({ key: 'volB', label: 'Clímax/absorción VSA al final de C', met: vsaC.met, detail: vsaC.detail })
 
   // RSI no extremo en el final de C (queda margen para reanudar la tendencia).
   const rC = ind.rsi[idx(3)]

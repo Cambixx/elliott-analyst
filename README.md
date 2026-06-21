@@ -99,8 +99,9 @@ En el **gráfico** se dibujan TODOS los escenarios detectados: el **primario** (
 
 ### Indicadores y confluencia
 
-- `src/domain/indicators/` — RSI (Wilder), MACD (12/26/9), EMA (20/50/200) como funciones puras.
+- `src/domain/indicators/` — RSI (Wilder), MACD (12/26/9), EMA (20/50/200) y **OBV** (On-Balance Volume, acumulado causal) como funciones puras.
 - `src/domain/elliott/confluence.ts` — evalúa 8 factores para impulsos (4 para ABC) que confirman o refutan el conteo. El score final del escenario es `0.5·estructura + 0.5·confluencia`.
+- **Lectura VSA de volumen** (`src/domain/elliott/vsa.ts`, integración de la capa medible de Wyckoff/Volume Spread Analysis): el factor de volumen lee **esfuerzo vs resultado** en el pivote de giro que Elliott ya detectó (fin de onda 5 / fin de onda C). Esfuerzo = volumen normalizado por **percentil/rank causal** sobre las velas anteriores (robusto al wash-trading de cripto: solo orden, no magnitud); resultado = CLV `(close−low)/(high−low)`. Clímax/absorción = esfuerzo alto **con** rechazo del extremo (predicado único en AND, no infla el disparo). Reemplaza la antigua heurística de volumen por medias; sigue siendo factor **suave** (mismas `key`/peso) y degrada en `wick_spike`. La divergencia de onda 5 (`div5`) se **corrobora con OBV** (AND debilitante: solo puede bajar su frecuencia de disparo, nunca subirla). Es confluencia probabilística, no señal.
 
 ### Motor de Elliott (`src/domain/elliott/`)
 
