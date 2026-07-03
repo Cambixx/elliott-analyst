@@ -1,29 +1,58 @@
 import type { Pivot } from './types'
 
+/** Fuerza ORDINAL del nivel (terciles dentro del set devuelto): lenguaje discreto,
+ *  nunca un score numérico que finja precisión. */
+export type SrStrength = 'fuerte' | 'moderada' | 'débil'
+
 export interface SrLevel {
-  /** Precio representativo del nivel (media de los toques agrupados). */
+  /** Precio representativo del nivel: MEDIANA de los toques (robusta a mechas outlier). */
   price: number
   /** Cuántos pivotes (swings) han reaccionado en este nivel. */
   touches: number
-  /** Índice de vela del toque más reciente (para ordenar por vigencia). */
+  /** Índice de vela del toque más reciente (para el decaimiento por recencia). */
   lastIndex: number
+  /** Borde inferior de la ZONA: el toque más bajo del cluster (dispersión real). */
+  low: number
+  /** Borde superior de la ZONA: el toque más alto del cluster. */
+  high: number
+  strength: SrStrength
 }
 
 export interface SrOptions {
-  /** Tolerancia relativa para agrupar precios en un mismo nivel (default 0,6%). */
+  /**
+   * Tolerancia relativa máxima de ANCHURA del nivel (default 0,6%). El caller debería
+   * derivarla de la volatilidad (p.ej. clamp(0.5·ATR14/close, 0.003, 0.015)): fija
+   * sobre-agrupa en mercados tranquilos y fragmenta en volátiles.
+   */
   tolerancePct?: number
   /** Toques mínimos para considerar el nivel significativo (default 2). */
   minTouches?: number
   /** Máximo de niveles a devolver (default 6). */
   max?: number
+  /** Índice de vela "actual" para la recencia (default: mayor índice de pivote). */
+  nowIndex?: number
+}
+
+/** Un nivel sin tocarse pierde la mitad de su vigencia cada HALF_LIFE velas. */
+const HALF_LIFE = 150
+
+function medianPrice(sortedByPrice: Pivot[]): number {
+  const n = sortedByPrice.length
+  const mid = Math.floor(n / 2)
+  return n % 2
+    ? sortedByPrice[mid].price
+    : (sortedByPrice[mid - 1].price + sortedByPrice[mid].price) / 2
 }
 
 /**
- * Detecta niveles horizontales de SOPORTE/RESISTENCIA agrupando los pivotes del
- * ZigZag por proximidad de precio: un precio donde el mercado ha reaccionado varias
- * veces es estructura relevante. Devuelve los niveles más fuertes (por nº de toques,
- * desempatando por vigencia). La clasificación soporte/resistencia depende del precio
- * actual, así que se decide al mostrarlos (ver `classifyLevel`).
+ * Detecta ZONAS horizontales de soporte/resistencia agrupando los pivotes del ZigZag
+ * por proximidad de precio, con clustering aglomerativo 1D de enlace COMPLETO: dos
+ * clusters vecinos solo se fusionan si la anchura TOTAL de la unión respeta la
+ * tolerancia (a diferencia del agrupado codicioso contra la media, que encadenaba
+ * toques y producía niveles más anchos que la propia tolerancia). El ranking combina
+ * toques con decaimiento por recencia: un nivel muy tocado pero abandonado hace
+ * cientos de velas pesa menos que uno reciente. La clasificación soporte/resistencia
+ * depende del precio actual, así que se decide al mostrarlos (ver `classifyLevel`).
  */
 export function supportResistance(pivots: Pivot[], opts: SrOptions = {}): SrLevel[] {
   const tol = opts.tolerancePct ?? 0.006
@@ -31,46 +60,68 @@ export function supportResistance(pivots: Pivot[], opts: SrOptions = {}): SrLeve
   const max = opts.max ?? 6
   if (pivots.length < 2) return []
 
-  // Ordenar por precio y agrupar de forma codiciosa los que caen dentro de la
-  // tolerancia respecto a la media móvil del grupo en curso.
   const sorted = [...pivots].filter((p) => p.price > 0).sort((a, b) => a.price - b.price)
-  const clusters: Pivot[][] = []
-  let current: Pivot[] = []
-  for (const p of sorted) {
-    if (current.length === 0) {
-      current = [p]
-      continue
-    }
-    const avg = current.reduce((s, x) => s + x.price, 0) / current.length
-    if (Math.abs(p.price - avg) / avg <= tol) current.push(p)
-    else {
-      clusters.push(current)
-      current = [p]
-    }
-  }
-  if (current.length) clusters.push(current)
+  if (sorted.length < 2) return []
+  const nowIndex = opts.nowIndex ?? sorted.reduce((m, p) => Math.max(m, p.index), 0)
 
-  const levels: SrLevel[] = clusters
+  // Aglomerativo 1D: cada pivote arranca como cluster; en cada paso se fusiona el PAR
+  // VECINO cuya unión quede más estrecha, solo si respeta la tolerancia (enlace
+  // completo). Los clusters vecinos concatenados siguen ordenados por precio.
+  const clusters: Pivot[][] = sorted.map((p) => [p])
+  for (;;) {
+    let bestI = -1
+    let bestWidth = Infinity
+    for (let i = 0; i + 1 < clusters.length; i++) {
+      const a = clusters[i]
+      const b = clusters[i + 1]
+      const lo = a[0].price
+      const hi = b[b.length - 1].price
+      const width = (hi - lo) / medianPrice([...a, ...b])
+      if (width <= tol && width < bestWidth) {
+        bestWidth = width
+        bestI = i
+      }
+    }
+    if (bestI < 0) break
+    clusters.splice(bestI, 2, [...clusters[bestI], ...clusters[bestI + 1]])
+  }
+
+  const levels = clusters
     .filter((c) => c.length >= minTouches)
     .map((c) => ({
-      price: c.reduce((s, x) => s + x.price, 0) / c.length,
+      price: medianPrice(c),
       touches: c.length,
       lastIndex: c.reduce((m, x) => Math.max(m, x.index), 0),
+      low: c[0].price,
+      high: c[c.length - 1].price,
     }))
 
-  // Más fuertes primero: más toques, y a igualdad, más recientes.
-  return levels.sort((a, b) => b.touches - a.touches || b.lastIndex - a.lastIndex).slice(0, max)
+  // Vigencia = toques × decaimiento exponencial por velas sin tocar el nivel.
+  const score = (l: (typeof levels)[number]) =>
+    l.touches * 2 ** (-(nowIndex - l.lastIndex) / HALF_LIFE)
+  const ranked = levels.sort((a, b) => score(b) - score(a)).slice(0, max)
+
+  // Fuerza ordinal por terciles del set devuelto (relativa, no absoluta).
+  const n = ranked.length
+  return ranked.map((l, i) => ({
+    ...l,
+    strength: i < n / 3 ? 'fuerte' : i < (2 * n) / 3 ? 'moderada' : 'débil',
+  }))
 }
 
-/** Clasifica un nivel respecto al precio actual (con una pequeña banda de "en precio"). */
+/**
+ * Clasifica un nivel respecto al precio actual usando su ZONA real [low, high]
+ * (con una banda mínima `bandPct` para zonas degeneradas de toques casi idénticos).
+ */
 export function classifyLevel(
   level: SrLevel,
   price: number,
   bandPct = 0.003,
 ): 'soporte' | 'resistencia' | 'en-precio' {
-  const diff = (level.price - price) / price
-  if (Math.abs(diff) <= bandPct) return 'en-precio'
-  return diff > 0 ? 'resistencia' : 'soporte'
+  const lo = Math.min(level.low, level.price * (1 - bandPct))
+  const hi = Math.max(level.high, level.price * (1 + bandPct))
+  if (price >= lo && price <= hi) return 'en-precio'
+  return level.price > price ? 'resistencia' : 'soporte'
 }
 
 /** Nivel S/R más cercano a un precio dado dentro de una tolerancia (o null). */

@@ -496,7 +496,9 @@ function MarketStructureCard({
                 {l.kind === 'soporte' ? 'Soporte' : 'Resistencia'}
               </span>
               <span className="font-mono text-slate-300">{fmtZone(l.price)}</span>
-              <span className="text-slate-500">· tocado {l.touches}×</span>
+              <span className="text-slate-500">
+                · zona {l.strength} · tocado {l.touches}×
+              </span>
             </li>
           ))}
         </ul>

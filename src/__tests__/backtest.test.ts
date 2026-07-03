@@ -60,7 +60,15 @@ describe('runBacktest', () => {
     }
     const r = runBacktest(candlesFromPath(path, 4), 2, { horizon: 20, maxEvaluations: 40 })
     expect(r.evaluated).toBeLessThanOrEqual(40 + 1)
-    for (const o of r.outcomes) {
+    // Anti-vacuidad: esta serie DEBE producir pronósticos en desarrollo medidos; si un
+    // cambio en el detector la deja sin outcomes, el bucle de forma no valida nada y
+    // hay que sustituir la serie (el test antiguo pasaba con 0 outcomes sin avisar).
+    expect(r.developingOutcomes.length).toBeGreaterThan(0)
+    // Cota del dedup por identidad estable (patrón+dir+origen): si regresara al dedup
+    // por id-de-vela, cada pronóstico persistente contaría una vez POR EVALUACIÓN y
+    // esta cota explotaría.
+    expect(r.developingOutcomes.length).toBeLessThanOrEqual(10)
+    for (const o of [...r.outcomes, ...r.developingOutcomes]) {
       expect(typeof o.hit).toBe('boolean')
       expect(o.bars).toBeGreaterThan(0)
       expect(o.bars).toBeLessThanOrEqual(20)

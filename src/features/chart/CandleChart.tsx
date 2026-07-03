@@ -27,6 +27,9 @@ import type { WaveForecast } from '@/domain/elliott/forecast'
 /** Nivel de S/R ya clasificado respecto al precio actual, listo para dibujar. */
 export interface SrDrawItem extends SrItem {
   price: number
+  /** Bordes de la zona (dispersión real de los toques del cluster). */
+  low: number
+  high: number
 }
 
 /** Añade alpha a un color hex #rrggbb → #rrggbbaa. */
@@ -34,6 +37,12 @@ const withAlpha = (hex: string, alpha: string) => hex + alpha
 
 interface CandleChartProps {
   candles: Candle[]
+  /**
+   * Identidad del dataset (p.ej. `${symbol}:${interval}`): mientras no cambie, los
+   * refetch de fondo se aplican de forma INCREMENTAL (solo la cola), preservando
+   * scroll/zoom/crosshair; al cambiar, se recarga el gráfico entero (reset legítimo).
+   */
+  datasetKey: string
   /** Última vela en vivo (del WebSocket); se aplica con updateData sin recargar todo. */
   liveCandle?: Candle | null
   /** Escenarios de Elliott a dibujar. El primero (primario) lleva la línea de invalidación. */
@@ -72,6 +81,7 @@ function toKLineData(c: Candle): KLineData {
 
 export function CandleChart({
   candles,
+  datasetKey,
   liveCandle,
   scenarios,
   fibZone,
@@ -85,6 +95,7 @@ export function CandleChart({
   const chartRef = useRef<Chart | null>(null)
   const rsiPaneRef = useRef<string | null>(null)
   const macdPaneRef = useRef<string | null>(null)
+  const loadedDatasetRef = useRef<string | null>(null)
 
   // Init / dispose del gráfico
   useEffect(() => {
@@ -120,10 +131,25 @@ export function CandleChart({
     }
   }, [])
 
-  // Datos históricos
+  // Datos históricos. applyNewData resetea scroll/zoom/crosshair y recalcula todos los
+  // indicadores, así que se RESERVA para el cambio de dataset (par/TF). Un refetch de
+  // fondo del MISMO dataset aplica solo la cola con updateData (reemplaza la última
+  // vela si el timestamp coincide, añade si es mayor) — mismo mecanismo que la vela
+  // en vivo — y el usuario no pierde dónde estaba mirando cada pocos minutos.
   useEffect(() => {
-    chartRef.current?.applyNewData(candles.map(toKLineData))
-  }, [candles])
+    const chart = chartRef.current
+    if (!chart || candles.length === 0) return
+    if (loadedDatasetRef.current !== datasetKey || chart.getDataList().length === 0) {
+      loadedDatasetRef.current = datasetKey
+      chart.applyNewData(candles.map(toKLineData))
+      return
+    }
+    const list = chart.getDataList()
+    const lastTs = list[list.length - 1]?.timestamp ?? -Infinity
+    for (const c of candles) {
+      if (c.timestamp >= lastTs) chart.updateData(toKLineData(c))
+    }
+  }, [candles, datasetKey])
 
   // Vela en vivo
   useEffect(() => {
@@ -145,11 +171,11 @@ export function CandleChart({
       ? `#fz:${fibZone.fromTs}:${fibZone.bandLow.toPrecision(8)}:${fibZone.bandHigh.toPrecision(8)}:${fibZone.broken}`
       : '') +
     (vwap ? `#vw:${vwap.anchorIndex}:${vwap.current.toPrecision(6)}` : '') +
-    // Solo el PRECIO de los niveles entra en la firma, NO su kind: el kind cambia
-    // cada tick al cruzar el precio la banda "en-precio" y forzaría un reborrado
-    // completo del gráfico en cada tick. El color del nivel se fija al redibujar.
+    // Solo la GEOMETRÍA de los niveles entra en la firma (zona y toques), NO su kind:
+    // el kind cambia cada tick al cruzar el precio la banda "en-precio" y forzaría un
+    // reborrado completo del gráfico en cada tick. El color se fija al redibujar.
     (srLevels && srLevels.length
-      ? `#sr:${srLevels.map((l) => l.price.toPrecision(6)).join(',')}`
+      ? `#sr:${srLevels.map((l) => `${l.low.toPrecision(6)}-${l.high.toPrecision(6)}x${l.touches}`).join(',')}`
       : '') +
     // CRÍTICO: el forecast debe estar en la firma para que el overlay aparezca/
     // desaparezca al togglear (mismo patrón que el resto de overlays).
@@ -161,14 +187,21 @@ export function CandleChart({
     if (!chart) return
     chart.removeOverlay() // limpia overlays previos y redibuja
 
-    // Soportes/resistencias horizontales (independientes del conteo de Elliott:
-    // se dibujan aunque no haya escenarios, igual que los muestra el panel).
+    // Zonas de soporte/resistencia horizontales (independientes del conteo de Elliott:
+    // se dibujan aunque no haya escenarios, igual que los muestra el panel). Cada nivel
+    // aporta DOS puntos (borde bajo y alto de su zona); el overlay los consume en pares.
     if (srLevels && srLevels.length > 0) {
+      const lastTs = candles[candles.length - 1]?.timestamp ?? 0
       chart.createOverlay({
         name: 'srLevels',
         lock: true,
-        points: srLevels.map((l) => ({ timestamp: candles[candles.length - 1]?.timestamp ?? 0, value: l.price })),
-        extendData: { items: srLevels.map((l) => ({ label: l.label, kind: l.kind })) } satisfies SrExtend,
+        points: srLevels.flatMap((l) => [
+          { timestamp: lastTs, value: l.low },
+          { timestamp: lastTs, value: l.high },
+        ]),
+        extendData: {
+          items: srLevels.map((l) => ({ label: l.label, kind: l.kind, touches: l.touches })),
+        } satisfies SrExtend,
       })
     }
 

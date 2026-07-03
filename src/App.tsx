@@ -21,6 +21,7 @@ import { computeFibZone } from '@/domain/elliott/fibZone'
 import { anchoredVwap } from '@/domain/vwap'
 import { computeForecast } from '@/domain/elliott/forecast'
 import { supportResistance, classifyLevel } from '@/domain/elliott/levels'
+import { computeATR } from '@/domain/elliott/atr'
 import type { SrDrawItem } from '@/features/chart/CandleChart'
 import { formatPrice } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
@@ -101,7 +102,8 @@ export default function App() {
   })()
 
   // VWAP anclado al origen del conteo que se dibuja (referencia institucional).
-  const closedCandles = candles?.filter((c) => c.closed) ?? []
+  // Memoizado: es dependencia de otros memos (S/R) y filtrar en cada render los rompería.
+  const closedCandles = useMemo(() => candles?.filter((c) => c.closed) ?? [], [candles])
   const vwap = (() => {
     const anchor = drawnScenarios[0]?.pivots[0]?.index
     if (anchor == null || closedCandles.length < 2) return null
@@ -119,13 +121,31 @@ export default function App() {
     [showForecast, drawnScenarios, pivots, higher.bias],
   )
 
-  const srLevelsRaw = useMemo(() => supportResistance(pivots), [pivots])
+  // Tolerancia de agrupado ADAPTATIVA a la volatilidad: ~la mitad de un ATR14 relativo,
+  // acotada [0.3%, 1.5%]. Fija sobre-agrupaba en calma y fragmentaba en volatilidad.
+  const srLevelsRaw = useMemo(() => {
+    const atr = computeATR(closedCandles, 14)
+    const lastAtr = atr[atr.length - 1]
+    const lastClose = closedCandles[closedCandles.length - 1]?.close
+    const tolerancePct =
+      Number.isFinite(lastAtr) && lastAtr > 0 && lastClose
+        ? Math.min(0.015, Math.max(0.003, (0.5 * lastAtr) / lastClose))
+        : undefined
+    return supportResistance(pivots, { tolerancePct, nowIndex: closedCandles.length - 1 })
+  }, [pivots, closedCandles])
   const srLevels: SrDrawItem[] = useMemo(() => {
     if (lastPrice == null) return []
     return srLevelsRaw.map((l) => {
       const kind = classifyLevel(l, lastPrice)
       const tag = kind === 'soporte' ? 'S' : kind === 'resistencia' ? 'R' : '•'
-      return { price: l.price, kind, label: `${tag} ×${l.touches}` }
+      return {
+        price: l.price,
+        low: l.low,
+        high: l.high,
+        touches: l.touches,
+        kind,
+        label: `${tag} ${formatPrice(l.price)} · ${l.touches} toques`,
+      }
     })
   }, [srLevelsRaw, lastPrice])
 
@@ -225,6 +245,7 @@ export default function App() {
           )}
           <CandleChart
             candles={candles ?? []}
+            datasetKey={`${symbol}:${interval}`}
             liveCandle={liveCandle}
             scenarios={drawnScenarios}
             fibZone={fibZone}

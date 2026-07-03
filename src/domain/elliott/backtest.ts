@@ -144,9 +144,16 @@ export function runBacktest(
       (x) => !x.developing && x.target && x.pattern !== 'triangulo' && x.pattern !== 'wxy',
     )
     if (conf?.target && !seen.has(conf.id)) {
-      seen.add(conf.id)
-      const res = firstPassage(entry, conf.target, conf.invalidation.price, future)
-      if (res) outcomes.push({ score: conf.score, hit: res.hit, bars: res.bars, metKeys: metKeysOf(conf) })
+      // Mismo guard que la pista B: si el precio YA está dentro de la zona objetivo,
+      // el conteo no mide "llegar al objetivo" y registraría un acierto trivial
+      // (hit con bars=1) que infla la tasa siempre al alza. No se marca `seen`,
+      // así el conteo puede medirse en una evaluación posterior si el precio sale.
+      const inZoneA = entry >= conf.target.low && entry <= conf.target.high
+      if (!inZoneA) {
+        seen.add(conf.id)
+        const res = firstPassage(entry, conf.target, conf.invalidation.price, future)
+        if (res) outcomes.push({ score: conf.score, hit: res.hit, bars: res.bars, metKeys: metKeysOf(conf) })
+      }
     }
 
     // (B) Mejor PRONÓSTICO EN DESARROLLO con objetivo de continuación (la onda en
