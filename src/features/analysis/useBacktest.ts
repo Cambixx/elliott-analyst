@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Candle } from '@/types/market'
 import { runBacktest, type BacktestResult } from '@/domain/elliott/backtest'
 import { calibrate, type Calibration } from '@/domain/elliott/calibration'
@@ -22,11 +22,22 @@ const OPTS = { horizon: 24, maxEvaluations: 120 }
  * par/TF/grado (el panel aparece cuando hay resultado). Fallback síncrono si el
  * entorno no soporta Workers.
  */
-export function useBacktest(candles: Candle[] | undefined, sensitivity: number): BacktestInsight | null {
+export function useBacktest(
+  candles: Candle[] | undefined,
+  sensitivity: number,
+  datasetKey: string,
+): BacktestInsight | null {
   const [insight, setInsight] = useState<BacktestInsight | null>(null)
+  const closed = useMemo(() => candles?.filter((c) => c.closed) ?? [], [candles])
+  // Firma ESTABLE del input real: par:TF (datasetKey) + longitud + timestamp de la última
+  // vela cerrada + grado. Un refetch de fondo que no añade velas cerradas nuevas deja la
+  // firma igual → el worker NO se relanza (el backtest es caro). CRÍTICO incluir datasetKey:
+  // dos pares en el MISMO intervalo comparten longitud y timestamp de la última cerrada
+  // (cierran a la vez), así que sin él la firma colisionaba y servía el backtest del par
+  // anterior. Antes se gateaba en la identidad de `candles`, que cambia en cada refetch.
+  const sig = `${datasetKey}:${closed.length}:${closed.at(-1)?.timestamp ?? 0}:${sensitivity}`
 
   useEffect(() => {
-    const closed = candles?.filter((c) => c.closed) ?? []
     if (closed.length < 120) {
       setInsight(null)
       return
@@ -65,7 +76,10 @@ export function useBacktest(candles: Candle[] | undefined, sensitivity: number):
       cancelled = true
       worker.terminate()
     }
-  }, [candles, sensitivity])
+    // Gateado por `sig` (firma estable): `closed`/`sensitivity` cambian de contenido solo
+    // cuando `sig` cambia, así que la lista de deps efectiva es correcta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig])
 
   return insight
 }

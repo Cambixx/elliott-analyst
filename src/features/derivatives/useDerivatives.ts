@@ -7,7 +7,6 @@ function useUsdtPerps() {
     queryKey: ['futures-perps'],
     queryFn: fetchUsdtPerps,
     staleTime: 60 * 60 * 1000,
-    retry: 1,
   })
 }
 
@@ -25,6 +24,5 @@ export function useDerivatives(base: string) {
     queryFn: () => fetchDerivatives(perp as string),
     enabled: !!perp,
     staleTime: 2 * 60 * 1000,
-    retry: 1,
   })
 }

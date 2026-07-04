@@ -26,10 +26,14 @@ export function zigzag(candles: Candle[], k = 3, atrPeriod = 14): Pivot[] {
     else pivots.push(p)
   }
 
-  // Semilla: el primer pivote (provisional) es un mínimo en el índice 0.
+  // Semilla: el primer pivote (provisional) es un mínimo en el índice 0. La BÚSQUEDA
+  // del primer máximo arranca desde candles[0].HIGH (no su low): el bucle empieza en
+  // i=1, así que sembrar el extremo con el low se saltaba candles[0].high y mal-preciaba
+  // el primer 'high' en mercados que caen desde la vela 0 (el high@0 salía con el precio
+  // del low). Si candle 0 resulta ser el techo, pushPivot reemplaza la semilla low@0.
   let trend: 1 | -1 = 1
   let extremeIdx = 0
-  let extremePrice = candles[0].low
+  let extremePrice = candles[0].high
   pushPivot({
     index: 0,
     timestamp: candles[0].timestamp,
@@ -127,12 +131,31 @@ export function williamsFilter(pivots: Pivot[], candles: Candle[], halfWin = 2):
     const p = kept[i]
     const last = out[out.length - 1]
     if (last && last.type === p.type) {
-      // El ÚLTIMO pivote (provisional/extremo en curso) es inamovible: ante
-      // colisión de tipo se conserva él (descartando el predecesor interior),
-      // no el más extremo — preservar el provisional es clave para el anti-repaint.
+      // El ÚLTIMO pivote (provisional/extremo en curso) es inamovible: ante colisión de
+      // tipo se conserva él, clave para el anti-repaint. PERO si el predecesor es un
+      // pivote CONFIRMADO MÁS extremo, sobrescribirlo lo haría "repintar" y contradiría
+      // el precio (mostraría un high que no es el más alto). En ese caso reinsertamos el
+      // pivote intermedio de tipo opuesto que fue filtrado, restaurando la alternancia
+      // [confirmado extremo, intermedio, provisional] en vez de descartar el confirmado.
       const isLast = i === kept.length - 1
+      const provAsExtreme = p.type === 'high' ? p.price >= last.price : p.price <= last.price
       if (isLast && out.length > 1) {
-        out[out.length - 1] = p
+        if (last.confirmed && !provAsExtreme) {
+          const oppType = p.type === 'high' ? 'low' : 'high'
+          let mid: Pivot | null = null
+          for (const q of pivots) {
+            if (q.index <= last.index || q.index >= p.index || q.type !== oppType) continue
+            if (!mid || (oppType === 'low' ? q.price < mid.price : q.price > mid.price)) mid = q
+          }
+          if (mid) {
+            out.push(mid, p)
+          } else {
+            // Sin intermedio que reinsertar: conservamos el provisional (anti-repaint).
+            out[out.length - 1] = p
+          }
+        } else {
+          out[out.length - 1] = p
+        }
       } else {
         const moreExtreme = p.type === 'high' ? p.price > last.price : p.price < last.price
         if (moreExtreme) out[out.length - 1] = p

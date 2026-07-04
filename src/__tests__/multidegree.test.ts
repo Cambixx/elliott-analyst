@@ -21,7 +21,7 @@ describe('williamsFilter', () => {
     expect(filtered[filtered.length - 1].index).toBe(pivots[pivots.length - 1].index)
   })
 
-  it('preserva el pivote provisional (último) aunque colisione con un predecesor más extremo', () => {
+  it('provisional colisiona con un confirmado MÁS extremo → conserva ambos, reinserta el intermedio', () => {
     // Velas planas a 100 salvo un low en 90 en el índice 11 (hace no-extremo al low@10).
     const candles: Candle[] = Array.from({ length: 20 }, (_, i) => ({
       timestamp: i * 60_000,
@@ -35,13 +35,45 @@ describe('williamsFilter', () => {
     const pivots = [
       mkPivot(0, 100, 'low'),
       mkPivot(5, 130, 'high'),
-      mkPivot(10, 95, 'low'), // se descarta (vecino en 11 baja a 90)
+      mkPivot(10, 95, 'low'), // falla isExtreme (vecino en 11 baja a 90) → colisión de highs
       mkPivot(15, 120, 'high', false), // provisional, MENOS extremo que high@5 (130)
     ]
     const filtered = williamsFilter(pivots, candles)
     const last = filtered[filtered.length - 1]
+    // Anti-repaint: el provisional sigue siendo el último.
     expect(last.confirmed).toBe(false)
-    expect(last.price).toBe(120) // el provisional sobrevive, no el high@5
+    expect(last.price).toBe(120)
+    // FIX auditoría: el high@5=130 (confirmado, el más alto REAL) ya NO se descarta;
+    // se reinserta el low@10 intermedio para restaurar la alternancia en vez de repintar.
+    expect(filtered.some((p) => p.price === 130 && p.type === 'high')).toBe(true)
+    expect(filtered.some((p) => p.price === 95 && p.type === 'low')).toBe(true)
+    // Alternancia estricta high/low mantenida.
+    for (let j = 1; j < filtered.length; j++)
+      expect(filtered[j].type).not.toBe(filtered[j - 1].type)
+  })
+
+  it('provisional MÁS extremo que el confirmado en colisión → sobrescribe (comportamiento previo)', () => {
+    const candles: Candle[] = Array.from({ length: 20 }, (_, i) => ({
+      timestamp: i * 60_000,
+      open: 100,
+      high: 100,
+      low: i === 11 ? 90 : 100,
+      close: 100,
+      volume: 1,
+      closed: true,
+    }))
+    const pivots = [
+      mkPivot(0, 100, 'low'),
+      mkPivot(5, 120, 'high'), // confirmado MENOS extremo
+      mkPivot(10, 95, 'low'), // se descarta
+      mkPivot(15, 130, 'high', false), // provisional MÁS extremo → domina
+    ]
+    const filtered = williamsFilter(pivots, candles)
+    const last = filtered[filtered.length - 1]
+    expect(last.confirmed).toBe(false)
+    expect(last.price).toBe(130)
+    // El confirmado inferior (120) se colapsa: el provisional es el extremo dominante.
+    expect(filtered.some((p) => p.price === 120)).toBe(false)
   })
 
   it('descarta un micro-pivote no-extremo y recolapsa', () => {

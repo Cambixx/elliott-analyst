@@ -108,8 +108,13 @@ export function AlertsCard({
             await ensurePermission()
             sendNotification('🔔 Notificación de prueba', 'Si ves esto, las notificaciones funcionan.')
           }}
-          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700"
-          title="Enviar una notificación de prueba"
+          disabled={permission === 'unsupported'}
+          className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+          title={
+            permission === 'unsupported'
+              ? 'Tu navegador no soporta notificaciones del sistema'
+              : 'Enviar una notificación de prueba'
+          }
         >
           probar
         </button>
@@ -125,6 +130,12 @@ export function AlertsCard({
       {permission === 'denied' && (
         <p className="mt-1 text-[10px] text-amber-400">
           Notificaciones bloqueadas en el navegador; las verás aquí igualmente.
+        </p>
+      )}
+      {permission === 'unsupported' && (
+        <p className="mt-1 text-[10px] text-amber-400">
+          Tu navegador no soporta notificaciones del sistema (p.ej. iOS Safari); las alertas se
+          mostrarán solo aquí.
         </p>
       )}
 

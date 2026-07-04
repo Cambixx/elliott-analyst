@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { init, dispose, type Chart, type KLineData } from 'klinecharts'
+import { init, dispose, LineType, type Chart, type KLineData } from 'klinecharts'
 import type { Candle } from '@/types/market'
 import type { Scenario } from '@/domain/elliott/types'
 import type { FibZone } from '@/domain/elliott/fibZone'
@@ -11,6 +11,8 @@ import type { ChannelExtend } from './channelOverlay'
 import type { VwapExtend } from './vwapOverlay'
 import type { SrExtend, SrItem } from './srOverlay'
 import type { ForecastExtend } from './forecastOverlay'
+import type { TargetClusterExtend } from './targetClusterOverlay'
+import type { TargetCluster } from '@/domain/elliott/targetClusters'
 import './elliottOverlay' // registra el overlay 'elliottWave'
 import './fibZoneOverlay' // registra el overlay 'fibZone'
 import './projectionOverlay' // registra el overlay 'projectionPath'
@@ -18,6 +20,7 @@ import './channelOverlay' // registra el overlay 'elliottChannel'
 import './vwapOverlay' // registra el overlay 'vwapLine'
 import './srOverlay' // registra el overlay 'srLevels'
 import './forecastOverlay' // registra el overlay 'waveForecast'
+import './targetClusterOverlay' // registra el overlay 'targetClusters'
 import { formatPrice as fmtPrice } from '@/lib/format'
 import { projectionTargets } from '@/domain/elliott/projection'
 import { channelDrawPoints } from '@/domain/elliott/channel'
@@ -53,6 +56,8 @@ interface CandleChartProps {
   vwap?: AnchoredVwap | null
   /** Niveles de soporte/resistencia ya clasificados respecto al precio actual. */
   srLevels?: SrDrawItem[]
+  /** Zonas de convergencia de objetivos (varios conteos apuntan a la misma zona). */
+  targetClusters?: TargetCluster[]
   /** Proyección hipotética de las ondas que faltan (null si el toggle está apagado o no aplica). */
   forecast?: WaveForecast | null
   showRsi: boolean
@@ -86,6 +91,7 @@ export function CandleChart({
   scenarios,
   fibZone,
   vwap,
+  targetClusters,
   srLevels,
   forecast,
   showRsi,
@@ -111,8 +117,26 @@ export function CandleChart({
     const chart = init(el, { styles: darkChartStyles })
     chartRef.current = chart
 
-    // Indicadores base: media móvil sobre las velas + volumen en panel inferior
-    chart?.createIndicator('MA', true, { id: 'candle_pane' })
+    // Contexto de tendencia: solo EMA 50 y 200 (antes MA 5/10/30/60, demasiado ruido),
+    // finas y tenues para no competir con las ondas de Elliott. Coherentes con las EMAs
+    // que ya usa el motor de confluencia (50/200). Volumen en el panel inferior.
+    chart?.createIndicator(
+      {
+        name: 'EMA',
+        calcParams: [50, 200],
+        styles: {
+          // Líneas COMPLETAS (style/smooth/dashedValue además de color/size): el override
+          // reemplaza el array de líneas por defecto sin fusionar campo a campo, y el
+          // fusionador de segmentos de klinecharts indexa `dashedValue[0]` — sin él, crashea.
+          lines: [
+            { style: LineType.Solid, smooth: false, dashedValue: [2, 2], size: 1, color: 'rgba(148,163,184,0.45)' }, // EMA50 slate tenue
+            { style: LineType.Solid, smooth: false, dashedValue: [2, 2], size: 1, color: 'rgba(203,213,225,0.7)' }, // EMA200 slate algo más marcada
+          ],
+        },
+      },
+      true,
+      { id: 'candle_pane' },
+    )
     chart?.createIndicator('VOL')
 
     const ro = new ResizeObserver(() => chart?.resize())
@@ -181,6 +205,9 @@ export function CandleChart({
     // desaparezca al togglear (mismo patrón que el resto de overlays).
     (forecast
       ? `#fc:${forecast.source}:${forecast.ghosts.map((g) => g.price.toPrecision(6)).join(',')}`
+      : '') +
+    (targetClusters && targetClusters.length
+      ? `#tc:${targetClusters.map((c) => `${c.zone.low.toPrecision(6)}-${c.zone.high.toPrecision(6)}x${c.count}`).join(',')}`
       : '')
   useEffect(() => {
     const chart = chartRef.current
@@ -202,6 +229,23 @@ export function CandleChart({
         extendData: {
           items: srLevels.map((l) => ({ label: l.label, kind: l.kind, touches: l.touches })),
         } satisfies SrExtend,
+      })
+    }
+
+    // Zonas de CONVERGENCIA de objetivos (varios conteos apuntan a la misma zona). Dos
+    // puntos por cluster (bordes de la zona de intersección), consumidos en pares.
+    if (targetClusters && targetClusters.length > 0) {
+      const lastTs = candles[candles.length - 1]?.timestamp ?? 0
+      chart.createOverlay({
+        name: 'targetClusters',
+        lock: true,
+        points: targetClusters.flatMap((c) => [
+          { timestamp: lastTs, value: c.zone.low },
+          { timestamp: lastTs, value: c.zone.high },
+        ]),
+        extendData: {
+          items: targetClusters.map((c) => ({ label: c.zone.label, count: c.count })),
+        } satisfies TargetClusterExtend,
       })
     }
 
@@ -332,8 +376,11 @@ export function CandleChart({
   // Auto-encuadre: ajusta zoom/scroll al rango de las ondas dibujadas cada vez que
   // cambian (cambio de par/temporalidad/grado o al aislar un conteo). Así las
   // estructuras quedan siempre bien encuadradas y nunca fuera de la vista.
-  // Firma por contenido (índices reales de pivotes), no solo ids: ver drawSig.
-  const fitSig = scenarios.map((s) => s.pivots.map((p) => p.index).join(',')).join('|')
+  // Firma por TIMESTAMP de pivote (no índice): al deslizarse la ventana de 1000 velas
+  // los índices cambian aunque la geometría sea la misma → firmar por índice re-encuadraba
+  // (robando el zoom/scroll del usuario) en cada vuelta de vela. Con timestamp, el efecto
+  // solo se dispara cuando la estructura cambia de verdad.
+  const fitSig = scenarios.map((s) => s.pivots.map((p) => p.timestamp).join(',')).join('|')
   useEffect(() => {
     const chart = chartRef.current
     const el = containerRef.current
@@ -346,10 +393,14 @@ export function CandleChart({
         if (p.index > i1) i1 = p.index
       }
     if (!Number.isFinite(i0) || !Number.isFinite(i1)) return
+    // Los índices de pivote son relativos al array `candles`; el chart puede tener MÁS
+    // velas acumuladas por los refetch incrementales. Como `candles` es un sufijo de los
+    // datos del chart, el offset (diferencia de longitudes) reindexa al espacio del chart.
+    const offset = Math.max(0, chart.getDataList().length - candles.length)
     const span = Math.max(1, i1 - i0)
     const barSpace = Math.min(30, Math.max(1.5, (el.clientWidth || 800) / (span * 1.5)))
     chart.setBarSpace(barSpace)
-    chart.scrollToDataIndex(i1 + Math.round(span * 0.15))
+    chart.scrollToDataIndex(i1 + offset + Math.round(span * 0.15))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSig])
 

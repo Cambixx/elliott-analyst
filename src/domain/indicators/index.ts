@@ -3,6 +3,7 @@ import { ema } from './ema'
 import { rsi } from './rsi'
 import { macd, type Macd } from './macd'
 import { obv } from './obv'
+import { computeADX, atrPercentile } from './adx'
 
 export interface Indicators {
   rsi: number[]
@@ -12,6 +13,10 @@ export interface Indicators {
   ema200: number[]
   /** On-Balance Volume acumulado (corrobora/contradice divergencias por volumen). */
   obv: number[]
+  /** ADX de Wilder (fuerza de tendencia, sin dirección) para el contexto de régimen. */
+  adx: number[]
+  /** Percentil causal del ATR relativo (volatilidad comprimida/expandida). */
+  atrPct: number[]
 }
 
 /** Calcula los indicadores que usa el score de confluencia, alineados por índice de vela. */
@@ -35,6 +40,8 @@ export function computeIndicators(candles: Candle[]): Indicators {
     ema50: ema(close, 50),
     ema200: ema(close, 200),
     obv: obv(candles),
+    adx: computeADX(candles),
+    atrPct: atrPercentile(candles),
   }
 }
 

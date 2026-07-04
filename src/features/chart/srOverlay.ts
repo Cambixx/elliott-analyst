@@ -82,12 +82,14 @@ registerOverlay({
         attrs: { coordinates: [{ x: 0, y: yMid }, { x: x2, y: yMid }] },
         styles: { color: `rgba(${rgb},${lineAlpha})`, size: lineSize, style: 'dashed', dashedValue: [4, 4] },
       })
-      // Etiqueta en el borde DERECHO (como fibZone): a la izquierda pisaría la
-      // leyenda OHLC/MA del pane. Chip con el color del tipo (no el azul default).
+      // Etiqueta en el borde IZQUIERDO: el DERECHO lo ocupan Fibonacci, la convergencia
+      // y el eje de precios (antes se apilaban todos ahí, ilegible). Chip con el color del
+      // tipo. La leyenda OHLC/EMA vive en las 2 primeras filas, así que solo se solaparía
+      // con un nivel muy arriba (poco frecuente).
       figures.push({
         type: 'text',
         ignoreEvent: true,
-        attrs: { x: x2 - 4, y: yMid - 3, text: item.label, align: 'right', baseline: 'bottom' },
+        attrs: { x: 4, y: yMid - 3, text: item.label, align: 'left', baseline: 'bottom' },
         styles: {
           color: KIND_TEXT[item.kind],
           size: 10,

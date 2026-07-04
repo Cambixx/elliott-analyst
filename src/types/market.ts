@@ -7,6 +7,13 @@ export interface Candle {
   low: number
   close: number
   volume: number
+  /**
+   * Volumen de compra AGRESORA (taker buy base volume, k[9]): parte del `volume` que
+   * vino de órdenes market comprando contra el ask. Permite el delta de flujo real
+   * (compras − ventas = 2·takerBuyVolume − volume). Opcional: velas cacheadas/sintéticas
+   * (tests) pueden no traerlo → los consumidores degradan con gracia.
+   */
+  takerBuyVolume?: number
   /** true si la vela ya cerró (clave para no repintar la vela en curso). */
   closed: boolean
 }

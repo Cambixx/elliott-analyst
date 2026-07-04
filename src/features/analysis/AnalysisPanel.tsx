@@ -5,6 +5,8 @@ import type { FibZone } from '@/domain/elliott/fibZone'
 import type { AnchoredVwap } from '@/domain/vwap'
 import type { WaveForecast } from '@/domain/elliott/forecast'
 import { classifyLevel, type SrLevel } from '@/domain/elliott/levels'
+import type { RegimeContext } from '@/domain/indicators/adx'
+import type { TargetCluster } from '@/domain/elliott/targetClusters'
 import { waveRelations } from '@/domain/elliott/relations'
 import { scenarioBias, type Bias as TradeBias } from '@/domain/elliott/opportunity'
 import {
@@ -18,7 +20,7 @@ import { weightedMetPct } from '@/domain/elliott/confluence'
 const FACTOR_LABEL: Record<string, string> = {
   estructura: 'Estructura válida',
   macd3: 'Pico MACD en onda 3',
-  div5: 'Divergencia RSI+OBV onda 5',
+  div5: 'Divergencia RSI+flujo onda 5',
   rsi3: 'RSI sano en onda 3',
   fib24: 'Fibonacci ondas 2 y 4',
   fibExt: 'Extensión Fibonacci 3/5',
@@ -28,11 +30,14 @@ const FACTOR_LABEL: Record<string, string> = {
   subondas: 'Subondas coherentes',
   volB: 'Clímax VSA (fin de C)',
   rsiC: 'RSI extremo al final de C',
+  regimen: 'Régimen (tendencia/volatilidad)',
 }
 import { alignmentWithBias, type HigherContext } from './useHigherTimeframe'
 import type { BacktestInsight } from './useBacktest'
 import { MarketContextCard } from '@/features/market-context/MarketContext'
 import { DerivativesCard } from '@/features/derivatives/DerivativesCard'
+import { useDerivatives } from '@/features/derivatives/useDerivatives'
+import { classifyFunding, oiTrend, derivativesRead } from '@/domain/derivatives'
 import { RiskCalculatorCard } from './RiskCalculator'
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { maximumFractionDigits: 8 })
@@ -78,6 +83,36 @@ const BIAS_STYLE: Record<Bias, string> = {
   alcista: 'bg-green-500/15 text-green-300 border-green-500/30',
   bajista: 'bg-red-500/15 text-red-300 border-red-500/30',
   mixto: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
+}
+
+const REGIME_STYLE: Record<RegimeContext['trend'], string> = {
+  'tendencia-fuerte': 'border-green-500/30 bg-green-500/15 text-green-300',
+  rango: 'border-slate-600 bg-slate-700/40 text-slate-300',
+  transicion: 'border-amber-500/30 bg-amber-500/15 text-amber-300',
+}
+
+/** Contexto global de RÉGIMEN de mercado (fuerza de tendencia + volatilidad). Es
+ *  descriptivo: no anticipa dirección ni es una señal. */
+function RegimeCard({ regime }: { regime: RegimeContext }) {
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+          Régimen de mercado
+        </span>
+        <span
+          className={'ml-auto rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ' + REGIME_STYLE[regime.trend]}
+        >
+          {regime.label}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+        <span className="font-mono text-slate-300">{regime.detail}</span>. Fuerza de tendencia (ADX de
+        Wilder) y percentil de volatilidad (ATR sobre 150 velas). Describe el entorno del mercado; no
+        anticipa dirección ni es una señal.
+      </p>
+    </div>
+  )
 }
 
 function HigherContextCard({ ctx }: { ctx: HigherContext }) {
@@ -217,12 +252,12 @@ function ScenarioCard({
         {scenario.developing ? (
           // El backtest solo cuenta conteos confirmados; su frecuencia no es
           // comparable con un conteo aún en desarrollo, así que no se muestra.
-          <span className="ml-1 text-slate-600">· en desarrollo, sin frecuencia comparable</span>
+          <span className="ml-1 text-slate-400">· en desarrollo, sin frecuencia comparable</span>
         ) : !projectsTarget ? (
           // La frecuencia del backtest mide si el escenario ALCANZA su objetivo
           // proyectado tras confirmar. Una corrección ya completada no tiene objetivo
           // pendiente que medir, así que la frecuencia no aplica (induciría a error).
-          <span className="ml-1 text-slate-600">· estructura completada, sin objetivo pendiente</span>
+          <span className="ml-1 text-slate-400">· estructura completada, sin objetivo pendiente</span>
         ) : likelihood.calibrated && likelihood.frequency ? (
           <span
             title="Frecuencia observada en el backtest del motor (conteos YA confirmados de este par/TF), medida desde la barra de confirmación. No predice el futuro."
@@ -232,7 +267,7 @@ function ScenarioCard({
             {likelihood.frequency.total} veces en conteos confirmados similares
           </span>
         ) : (
-          <span className="ml-1 text-slate-600">· aún sin histórico suficiente para este par</span>
+          <span className="ml-1 text-slate-400">· aún sin histórico suficiente para este par</span>
         )}
       </div>
       {scenario.developing && (
@@ -254,8 +289,8 @@ function ScenarioCard({
           <p className="mt-1.5 rounded border border-amber-700/40 bg-amber-950/20 px-2 py-1 text-[11px] leading-relaxed text-amber-200/90">
             <span className="font-semibold">Pronóstico:</span> continuación{' '}
             {tradeBias === 'compra' ? 'al alza' : 'a la baja'} hacia{' '}
-            {fmtZone(scenario.target.low)}–{fmtZone(scenario.target.high)}; se invalida si pierde{' '}
-            {fmtZone(scenario.invalidation.price)}.{' '}
+            {fmtZone(scenario.target.low)}–{fmtZone(scenario.target.high)}; se invalida si{' '}
+            {tradeBias === 'compra' ? 'pierde' : 'supera'} {fmtZone(scenario.invalidation.price)}.{' '}
             <span className="text-amber-300/70">Mayor incertidumbre: la onda aún puede repintar.</span>
           </p>
         )}
@@ -311,7 +346,7 @@ function ScenarioCard({
               <span className={f.met ? 'text-green-400' : 'text-slate-600'}>{f.met ? '✓' : '✗'}</span>
               <span className={f.met ? 'text-slate-300' : 'text-slate-500'}>
                 {f.label}
-                {f.detail && <span className="text-slate-600"> · {f.detail}</span>}
+                {f.detail && <span className="text-slate-400"> · {f.detail}</span>}
               </span>
             </li>
           ))}
@@ -347,8 +382,15 @@ function ScenarioCard({
 /** Panel de fiabilidad histórica del propio motor sobre el par/TF actual. */
 function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
   const { result, calibration, developingCalibration } = insight
-  const pct = calibration.hitRate != null ? Math.round(calibration.hitRate * 100) : null
-  const devPct = developingCalibration.hitRate != null ? Math.round(developingCalibration.hitRate * 100) : null
+  // Un porcentaje solo se muestra con muestra suficiente (misma política que
+  // scoreToLikelihood): con n<8, una tasa "100% (7/7)" finge precisión que no hay.
+  const confEnough = result.resolved >= MIN_CALIBRATION_SAMPLE
+  const devEnough = result.developingResolved >= MIN_CALIBRATION_SAMPLE
+  const pct = confEnough && calibration.hitRate != null ? Math.round(calibration.hitRate * 100) : null
+  const devPct =
+    devEnough && developingCalibration.hitRate != null
+      ? Math.round(developingCalibration.hitRate * 100)
+      : null
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
       <div className="flex items-center gap-2">
@@ -371,9 +413,13 @@ function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
           <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
             Los pronósticos de <strong className="text-amber-200">continuación</strong> (onda en curso
             hacia su objetivo) lo alcanzaron antes que la invalidación{' '}
-            {devPct != null && <strong className="text-amber-200">{devPct}% de las veces</strong>} (
-            {developingCalibration.hits}/{result.developingResolved}). Más útiles para operar, pero más
-            inciertos: la onda aún puede repintar.
+            {devPct != null ? (
+              <strong className="text-amber-200">{devPct}% de las veces</strong>
+            ) : (
+              <span className="text-slate-500">en {developingCalibration.hits} de {result.developingResolved} (muestra insuficiente)</span>
+            )}
+            {devPct != null && ` (${developingCalibration.hits}/${result.developingResolved})`}. Más
+            útiles para operar, pero más inciertos: la onda aún puede repintar.
           </p>
         </div>
       )}
@@ -382,29 +428,38 @@ function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
         Conteos <strong className="text-slate-300">confirmados</strong> (ya completados):
         alcanzaron su zona objetivo antes que la invalidación{' '}
         {pct != null ? (
-          <strong className="text-slate-200">{pct}% de las veces</strong>
+          <>
+            <strong className="text-slate-200">{pct}% de las veces</strong>{' '}
+            {`(${calibration.hits}/${result.resolved})`}.
+          </>
+        ) : result.resolved > 0 ? (
+          <span className="text-slate-500">
+            en {calibration.hits} de {result.resolved} (muestra insuficiente para una tasa).
+          </span>
         ) : (
-          'sin casos suficientes'
-        )}{' '}
-        {result.resolved > 0 && `(${calibration.hits}/${result.resolved})`}.
+          'sin casos suficientes todavía.'
+        )}
       </p>
       <div className="mt-2 space-y-1">
         {calibration.buckets
           .filter((b) => b.n > 0)
-          .map((b) => (
+          .map((b) => {
+            const bucketEnough = b.n >= MIN_CALIBRATION_SAMPLE
+            return (
             <div key={b.label} className="flex items-center gap-2 text-[11px]">
               <span className="w-12 capitalize text-slate-400">{b.label}</span>
               <div className="h-1.5 flex-1 overflow-hidden rounded bg-slate-700">
                 <div
                   className="h-full rounded bg-cyan-500/70"
-                  style={{ width: `${Math.round((b.hitRate ?? 0) * 100)}%` }}
+                  style={{ width: bucketEnough ? `${Math.round((b.hitRate ?? 0) * 100)}%` : '0%' }}
                 />
               </div>
               <span className="w-16 text-right font-mono text-slate-500">
-                {b.hitRate != null ? Math.round(b.hitRate * 100) : '—'}% · {b.n}
+                {bucketEnough && b.hitRate != null ? `${Math.round(b.hitRate * 100)}%` : 'n ='} · {b.n}
               </span>
             </div>
-          ))}
+            )
+          })}
       </div>
 
       {(() => {
@@ -420,7 +475,7 @@ function EngineReliabilityCard({ insight }: { insight: BacktestInsight }) {
             <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
               Factores presentes en los aciertos
             </span>
-            <p className="mt-0.5 text-[10px] leading-relaxed text-slate-600">
+            <p className="mt-0.5 text-[10px] leading-relaxed text-slate-400">
               Tasa de acierto observada cuando el factor estaba presente. Es asociación, no causa, y
               con muestra pequeña; no se usa para repesar el score.
             </p>
@@ -458,12 +513,14 @@ function MarketStructureCard({
   vwap,
   levels,
   price,
+  clusters,
 }: {
   vwap?: AnchoredVwap | null
   levels: SrLevel[]
   price?: number | null
+  clusters?: TargetCluster[]
 }) {
-  if ((!vwap && levels.length === 0) || price == null) return null
+  if ((!vwap && levels.length === 0 && !clusters?.length) || price == null) return null
   const vwapDiff = vwap ? (price - vwap.current) / vwap.current : null
   // Niveles más fuertes que NO están justo en el precio, ordenados por cercanía.
   const shown = levels
@@ -480,12 +537,23 @@ function MarketStructureCard({
       {vwap && vwapDiff != null && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
           <span className="text-violet-300">VWAP anclado {fmtZone(vwap.current)}</span> · precio{' '}
-          <strong className={vwapDiff >= 0 ? 'text-green-300' : 'text-red-300'}>
-            {vwapDiff >= 0 ? '+' : ''}
-            {(vwapDiff * 100).toFixed(1)}%
-          </strong>{' '}
-          {vwapDiff >= 0 ? 'por encima' : 'por debajo'} (los{' '}
-          {vwapDiff >= 0 ? 'compradores' : 'vendedores'} dominan desde el origen del conteo).
+          {Math.abs(vwapDiff) < 0.003 ? (
+            // Banda neutra: a ±0,3% del VWAP no hay dominancia clara (evita afirmar
+            // "los compradores dominan" con el precio pegado al VWAP).
+            <>
+              <strong className="text-slate-300">pegado al VWAP</strong> (equilibrio entre compradores
+              y vendedores desde el origen del conteo).
+            </>
+          ) : (
+            <>
+              <strong className={vwapDiff >= 0 ? 'text-green-300' : 'text-red-300'}>
+                {vwapDiff >= 0 ? '+' : ''}
+                {(vwapDiff * 100).toFixed(1)}%
+              </strong>{' '}
+              {vwapDiff >= 0 ? 'por encima' : 'por debajo'} (los{' '}
+              {vwapDiff >= 0 ? 'compradores' : 'vendedores'} dominan desde el origen del conteo).
+            </>
+          )}
         </p>
       )}
       {shown.length > 0 && (
@@ -502,6 +570,27 @@ function MarketStructureCard({
             </li>
           ))}
         </ul>
+      )}
+      {clusters && clusters.length > 0 && (
+        <div className="mt-2 border-t border-slate-700/60 pt-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
+            Convergencia de objetivos
+          </span>
+          <ul className="mt-1 space-y-0.5 text-[11px]">
+            {clusters.map((c) => (
+              <li key={`${c.zone.low}-${c.zone.high}`} className="flex items-center gap-2">
+                <span className="text-indigo-300">⌖ {c.count} conteos</span>
+                <span className="font-mono text-slate-300">
+                  {fmtZone(c.zone.low)}–{fmtZone(c.zone.high)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
+            Varios conteos apuntan a la misma zona. Convergen por geometría compartida (mismos pivotes
+            y ratios Fibonacci), no por confirmación independiente: no es un objetivo ni una probabilidad.
+          </p>
+        </div>
       )}
       <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
         Niveles donde el precio ha reaccionado y VWAP de las operaciones desde el origen: confluencia,
@@ -527,9 +616,14 @@ export function AnalysisPanel({
   backtest,
   onSelect,
   alertsSlot,
+  dataStatus = 'ready',
+  regime,
+  clusters,
 }: {
   scenarios: Scenario[]
   higher: HigherContext
+  regime?: RegimeContext | null
+  clusters?: TargetCluster[]
   base: string
   symbol?: string
   timeframe?: string
@@ -544,11 +638,24 @@ export function AnalysisPanel({
   backtest?: BacktestInsight | null
   onSelect?: (id: string) => void
   alertsSlot?: ReactNode
+  /** Estado de la carga de velas: distingue "cargando/error" de "sin estructura clara". */
+  dataStatus?: 'loading' | 'error' | 'ready'
 }) {
   // El posicionamiento de derivados se contrasta con el escenario que el usuario está
   // mirando: el aislado si hay uno, o el primario por defecto (antes siempre el primario,
   // lo que descuadraba la lectura al aislar un alternativo de sesgo contrario).
   const biasScenario = (focusedId && scenarios.find((s) => s.id === focusedId)) || scenarios[0]
+  // Lectura de derivados frente al escenario, para el checklist del diario (react-query
+  // deduplica esta query con la de DerivativesCard por su queryKey).
+  const derivsQuery = useDerivatives(base)
+  const derivsAlignment =
+    derivsQuery.data && biasScenario
+      ? derivativesRead(
+          classifyFunding(derivsQuery.data.fundingRate),
+          oiTrend(derivsQuery.data.oiHistory).trend,
+          scenarioBias(biasScenario),
+        ).alignment
+      : null
   return (
     <aside className="flex w-full shrink-0 flex-col gap-3 overflow-visible border-t border-slate-800 bg-slate-900/40 p-4 lg:w-96 lg:overflow-y-auto lg:border-l lg:border-t-0">
       <div>
@@ -560,11 +667,12 @@ export function AnalysisPanel({
 
       {alertsSlot}
       <HigherContextCard ctx={higher} />
+      {regime && <RegimeCard regime={regime} />}
       <MarketContextCard base={base} referencePrice={closedPrice ?? lastPrice} />
       {scenarios.length > 0 && (
         <DerivativesCard base={base} bias={scenarioBias(biasScenario)} />
       )}
-      <MarketStructureCard vwap={vwap} levels={structureLevels ?? []} price={lastPrice} />
+      <MarketStructureCard vwap={vwap} levels={structureLevels ?? []} price={lastPrice} clusters={clusters} />
       {forecast && (
         <p className="rounded border border-violet-700/40 bg-violet-950/20 px-2 py-1.5 text-[11px] leading-relaxed text-violet-200/90">
           <span className="font-semibold">Proyección de ondas activa</span> ({forecast.ghosts.map((g) => g.label).join(' · ')}).{' '}
@@ -575,8 +683,11 @@ export function AnalysisPanel({
 
       {scenarios.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-700 bg-slate-800/40 p-3 text-xs leading-relaxed text-slate-400">
-          No se detecta una estructura de Elliott clara con la sensibilidad actual. Prueba a cambiar
-          el grado de onda o la temporalidad.
+          {dataStatus === 'loading'
+            ? 'Cargando análisis…'
+            : dataStatus === 'error'
+              ? 'No se pudieron cargar las velas. Reintentando; comprueba tu conexión.'
+              : 'No se detecta una estructura de Elliott clara con la sensibilidad actual. Prueba a cambiar el grado de onda o la temporalidad.'}
         </div>
       ) : (
         scenarios.map((s, i) => (
@@ -610,6 +721,8 @@ export function AnalysisPanel({
           price={lastPrice}
           symbol={symbol}
           timeframe={timeframe}
+          higherBias={higher.bias}
+          derivsAlignment={derivsAlignment}
         />
       )}
 

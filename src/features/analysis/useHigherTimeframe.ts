@@ -32,6 +32,11 @@ export function useHigherTimeframe(
   const { data, isLoading } = useQuery({
     queryKey: ['klines', symbol, higher],
     queryFn: () => fetchKlines(symbol, higher, 1000),
+    // El contexto del marco superior también debe refrescarse en sesiones largas
+    // (antes se congelaba para siempre). Todo TF superior es ≥1h y `higher` puede ser
+    // '1M' (fuera de TIMEFRAME_MS), así que un intervalo fijo de 5 min es simple y basta:
+    // el análisis usa solo velas cerradas, sobre-refrescar es barato e inocuo.
+    refetchInterval: 300_000,
   })
 
   return useMemo(() => {

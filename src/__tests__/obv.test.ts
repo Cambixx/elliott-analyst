@@ -6,6 +6,10 @@ function mkCandle(close: number, volume: number): Candle {
   return { timestamp: 0, open: close, high: close, low: close, close, volume, closed: true }
 }
 
+function mkCandleT(close: number, volume: number, takerBuyVolume: number): Candle {
+  return { timestamp: 0, open: close, high: close, low: close, close, volume, takerBuyVolume, closed: true }
+}
+
 describe('obv', () => {
   it('acumula con el signo del cambio de cierre, alineado por índice y empezando en 0', () => {
     const candles = [
@@ -38,6 +42,21 @@ describe('obv', () => {
 
   it('serie vacía → array vacío', () => {
     expect(obv([])).toEqual([])
+  })
+
+  it('con volumen de compra agresora usa el DELTA real (2·takerBuy − volumen), no Granville', () => {
+    // Cierres PLANOS a propósito: Granville daría 0; el delta real capta el flujo agresor.
+    const candles = [
+      mkCandleT(100, 100, 50), // baseline (índice 0, no acumula)
+      mkCandleT(100, 100, 80), // delta = 2·80 − 100 = +60 (compra domina)
+      mkCandleT(100, 100, 20), // delta = 2·20 − 100 = −60 (venta domina)
+    ]
+    expect(obv(candles)).toEqual([0, 60, 0])
+  })
+
+  it('degrada a Granville (signo del cierre) cuando falta el volumen de compra agresora', () => {
+    const candles = [mkCandle(1, 10), mkCandle(2, 10), mkCandle(3, 10)]
+    expect(obv(candles)).toEqual([0, 10, 20])
   })
 })
 

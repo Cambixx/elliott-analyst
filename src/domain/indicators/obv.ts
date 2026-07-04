@@ -1,19 +1,33 @@
 import type { Candle } from '@/types/market'
 
 /**
- * On-Balance Volume (Granville), causal y alineado por índice de vela:
- * obv[0] = 0; obv[i] = obv[i-1] ± volume[i] según el signo del cambio de cierre.
- * Acumulado desde 0 (sin warmup NaN). Cada obv[i] depende solo de velas ≤ i → sin
- * look-ahead. Sin parámetros: la definición es fija.
+ * Aportación de flujo con SIGNO de una vela, en unidades de volumen base:
+ *  - Si hay volumen de compra agresora (taker buy, k[9]): DELTA REAL = compras − ventas
+ *    = 2·takerBuyVolume − volume. Mide quién ganó la barra de verdad (órdenes market),
+ *    no el proxy de Granville.
+ *  - Si falta el dato (velas sintéticas/cacheadas antiguas): fallback a Granville, que
+ *    asigna TODO el volumen según el signo del cambio de cierre (necesita la vela previa).
+ */
+function signedFlow(c: Candle, prev: Candle | undefined): number {
+  const tbv = c.takerBuyVolume
+  if (tbv != null && Number.isFinite(tbv)) return 2 * tbv - c.volume
+  if (!prev) return 0
+  const dc = c.close - prev.close
+  return dc > 0 ? c.volume : dc < 0 ? -c.volume : 0
+}
+
+/**
+ * On-Balance Volume acumulado, causal y alineado por índice: obv[0]=0; obv[i]=obv[i-1]+
+ * flujo con signo de la vela i (ver `signedFlow`). Con datos de Binance usa el DELTA REAL
+ * de flujo agresor (compras−ventas); sin él, degrada al OBV clásico de Granville. Acumulado
+ * desde 0 (sin warmup NaN); cada obv[i] depende solo de velas ≤ i → sin look-ahead.
  */
 export function obv(candles: Candle[]): number[] {
   const out = new Array<number>(candles.length)
   if (candles.length === 0) return out
   out[0] = 0
   for (let i = 1; i < candles.length; i++) {
-    const dc = candles[i].close - candles[i - 1].close
-    const signed = dc > 0 ? candles[i].volume : dc < 0 ? -candles[i].volume : 0
-    out[i] = out[i - 1] + signed
+    out[i] = out[i - 1] + signedFlow(candles[i], candles[i - 1])
   }
   return out
 }

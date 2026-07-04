@@ -152,12 +152,13 @@ describe('deriveOpportunity — matriz nivel × confianza × zona', () => {
 
   it('compone la razón: confianza + zona objetivo', () => {
     const opp = deriveOpportunity(sc('media'), 112, 'equilibrado')
-    expect(opp!.reason).toBe('conteo de confluencia media · precio en zona objetivo')
+    expect(opp!.reason).toBe('conteo de confianza media · precio en zona objetivo')
+    expect(opp!.reason).not.toContain('confluencia') // término del panel es "confianza"
   })
 
   it('compone la razón: confianza + junto a la invalidación', () => {
     const opp = deriveOpportunity(sc('media'), 100.6, 'equilibrado')
-    expect(opp!.reason).toBe('conteo de confluencia media · precio junto al nivel de invalidación')
+    expect(opp!.reason).toBe('conteo de confianza media · precio junto al nivel de invalidación')
   })
 
   it('baja en zona (amplio): la razón solo lleva la zona, sin confianza', () => {

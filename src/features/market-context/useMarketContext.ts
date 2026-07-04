@@ -7,7 +7,6 @@ export function useFearGreed() {
     queryKey: ['fear-greed'],
     queryFn: fetchFearGreed,
     staleTime: 10 * 60 * 1000,
-    retry: 1,
   })
 }
 
@@ -17,6 +16,5 @@ export function useCoinMarket(base: string) {
     queryKey: ['coin-market', base],
     queryFn: () => fetchCoinMarket(base),
     staleTime: 5 * 60 * 1000,
-    retry: 1,
   })
 }

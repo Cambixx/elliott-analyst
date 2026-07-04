@@ -217,7 +217,7 @@ function buildImpulse(
   const { score, confidence } = blend(scored.score, confluence, developing)
 
   return {
-    id: `impulse-${dir}-${p[0].index}-${p[5].index}`,
+    id: `impulse-${dir}-${p[0].timestamp}-${p[5].timestamp}`,
     kind: 'impulse',
     pattern: 'impulso',
     direction: dir,
@@ -331,7 +331,7 @@ function buildAbc(
   const { score, confidence } = blend(scored.score, confluence, developing)
 
   return {
-    id: `${pattern}-${dir}-${p[0].index}-${p[3].index}`,
+    id: `${pattern}-${dir}-${p[0].timestamp}-${p[3].timestamp}`,
     kind: 'correction',
     pattern,
     direction: dir,
@@ -448,7 +448,7 @@ function buildWxy(
     `suele reanudarse la tendencia previa a la corrección; es un mapa de escenarios, no una señal.`
 
   return {
-    id: `wxy-${dir}-${p[0].index}-${p[7].index}`,
+    id: `wxy-${dir}-${p[0].timestamp}-${p[7].timestamp}`,
     kind: 'correction',
     pattern: 'wxy',
     direction: dir,
@@ -549,7 +549,7 @@ function buildDiagonal(
   const { score, confidence } = blend(scored.score, confluence, developing)
 
   return {
-    id: `diagonal-${dir}-${p[0].index}-${p[5].index}`,
+    id: `diagonal-${dir}-${p[0].timestamp}-${p[5].timestamp}`,
     kind: 'impulse',
     pattern: 'diagonal',
     direction: dir,
@@ -617,7 +617,7 @@ function buildTriangle(p: Pivot[], scored: Scored, candles: Candle[], ind: Indic
   const { score, confidence } = blend(scored.score, confluence, developing)
 
   return {
-    id: `triangulo-${p[0].index}-${p[5].index}`,
+    id: `triangulo-${p[0].timestamp}-${p[5].timestamp}`,
     kind: 'correction',
     pattern: 'triangulo',
     direction: p[0].type === 'high' ? 'down' : 'up',
@@ -656,14 +656,14 @@ function collectCandidates(pivots: Pivot[], candles: Candle[], ind: Indicators):
   for (let s = 0; s + 6 <= recentI.length; s++) {
     const w = recentI.slice(s, s + 6)
     const tri = scoreTriangle(w)
-    if (tri) out.triangle = keepBest(out.triangle, buildTriangle(w, tri, candles, ind))
+    if (tri) out.triangle = keepBest(out.triangle, applyPivotQuality(buildTriangle(w, tri, candles, ind)))
     for (const dir of directions) {
       const expectedFirst = dir === 'up' ? 'low' : 'high'
       if (w[0].type !== expectedFirst) continue
       const imp = scoreImpulse(w, dir)
-      if (imp) out.impulse = keepBest(out.impulse, buildImpulse(w, dir, imp, candles, ind))
+      if (imp) out.impulse = keepBest(out.impulse, applyPivotQuality(buildImpulse(w, dir, imp, candles, ind)))
       const dia = scoreDiagonal(w, dir)
-      if (dia) out.diagonal = keepBest(out.diagonal, buildDiagonal(w, dir, dia, candles, ind))
+      if (dia) out.diagonal = keepBest(out.diagonal, applyPivotQuality(buildDiagonal(w, dir, dia, candles, ind)))
     }
   }
 
@@ -675,7 +675,7 @@ function collectCandidates(pivots: Pivot[], candles: Candle[], ind: Indicators):
       const expectedFirst = dir === 'up' ? 'low' : 'high'
       if (w[0].type !== expectedFirst) continue
       const abc = scoreAbc(w, dir)
-      if (abc) out.abc = keepBest(out.abc, buildAbc(w, dir, abc, candles, ind))
+      if (abc) out.abc = keepBest(out.abc, applyPivotQuality(buildAbc(w, dir, abc, candles, ind)))
     }
   }
 
@@ -687,7 +687,7 @@ function collectCandidates(pivots: Pivot[], candles: Candle[], ind: Indicators):
       const expectedFirst = dir === 'up' ? 'low' : 'high'
       if (w[0].type !== expectedFirst) continue
       const wxy = scoreWxy(w, dir)
-      if (wxy) out.wxy = keepBest(out.wxy, buildWxy(w, dir, wxy, candles, ind))
+      if (wxy) out.wxy = keepBest(out.wxy, applyPivotQuality(buildWxy(w, dir, wxy, candles, ind)))
     }
   }
   return out
@@ -706,7 +706,10 @@ function selectDiverse(c: Candidates): Scenario[] {
     if (picked.length >= 3) break
     picked.push(s)
   }
-  return picked.map(applyPivotQuality).sort(byScore)
+  // applyPivotQuality YA se aplicó al construir cada candidato (en collectCandidates),
+  // así su penalización participa en keepBest/pickBetter/top-3. No re-aplicar aquí
+  // (no es idempotente: multiplicaría ×0.9 otra vez).
+  return picked.sort(byScore)
 }
 
 /**
@@ -746,7 +749,11 @@ export function detectScenariosMultiDegree(
     merged.triangle = pickBetter(merged.triangle, c.triangle)
     merged.wxy = pickBetter(merged.wxy, c.wxy)
   }
-  return { pivots: basePivots, scenarios: selectDiverse(merged) }
+  // Los pivotes expuestos (que consumen forecast naciente y S/R) también pasan por
+  // williamsFilter: antes eran los crudos del zigzag (micro-pivotes), incoherentes con
+  // los conteos. williamsFilter conserva el primer/último pivote y el provisional
+  // (sin confirmar), así que forecastNascentImpulse sigue viendo P2 sin confirmar.
+  return { pivots: williamsFilter(basePivots, candles), scenarios: selectDiverse(merged) }
 }
 
 const pickBetter = (a: Scenario | null, b: Scenario | null): Scenario | null => {

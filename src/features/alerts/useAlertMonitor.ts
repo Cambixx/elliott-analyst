@@ -89,9 +89,10 @@ export function useAlertMonitor() {
           pushed++
           // Las ondas en desarrollo son pronósticos de continuación, más inciertos.
           const devMark = primary.developing ? ' · en desarrollo (puede repintar)' : ''
+          // Lenguaje de HIPÓTESIS, no de señal: "sesgo compra" en minúsculas, no "COMPRA".
           sendNotification(
-            `${BIAS_EMOJI[opp.bias]} ${base}/USDC ${alertTimeframe} · ${opp.bias.toUpperCase()}${devMark}`,
-            `${primary.title} — ${opp.reason}. Entra a analizar.`,
+            `${BIAS_EMOJI[opp.bias]} ${base}/USDC ${alertTimeframe} · sesgo ${opp.bias}${devMark}`,
+            `${primary.title} — ${opp.reason}. Hipótesis, no señal: entra a revisar el conteo.`,
           )
         } catch (err) {
           // Par concreto falla (incl. 429/418): seguimos, pero lo registramos.

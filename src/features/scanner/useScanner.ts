@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { fetchKlines, fetchTickers, fetchUsdcUniverse, type Ticker } from '@/api/binance'
+import { fetchKlines, fetchTickers, fetchUsdcUniverse, binanceBannedForMs, type Ticker } from '@/api/binance'
 import { detectScenariosMultiDegree } from '@/domain/elliott/detector'
 import { degreeList } from '@/domain/elliott/backtest'
 import { deriveOpportunity, scenarioBias, type Bias } from '@/domain/elliott/opportunity'
@@ -25,6 +25,17 @@ export interface ScanResult {
 
 const UNIVERSE_SIZE = 40
 const CONCURRENCY = 8
+/** Caché válida de un escaneo (evita re-escanear 40 pares al volver a la pestaña). */
+const SCAN_TTL_MS = 5 * 60 * 1000
+
+interface CachedScan {
+  results: ScanResult[]
+  lastScan: number
+}
+// Caché a nivel de MÓDULO (sobrevive al desmontaje de ScannerView al cambiar de pestaña):
+// clave = `${timeframe}:${sensitivity}`. Antes, cada visita relanzaba un escaneo completo.
+const scanCache = new Map<string, CachedScan>()
+const cacheKey = (tf: string, sensitivity: number) => `${tf}:${sensitivity}`
 
 /** Ejecuta `fn` sobre `items` con un máximo de `limit` en paralelo. */
 async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -46,7 +57,24 @@ export function useScanner() {
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [error, setError] = useState<string | null>(null)
   const [lastScan, setLastScan] = useState<number | null>(null)
+  /** Temporalidad a la que pertenecen los resultados actuales (para marcar los caducos). */
+  const [resultsTf, setResultsTf] = useState<string | null>(null)
   const busy = useRef(false)
+
+  /** Carga resultados cacheados si son frescos; devuelve true si evitó el escaneo. */
+  const loadCached = useCallback(
+    (timeframe: string): boolean => {
+      const hit = scanCache.get(cacheKey(timeframe, sensitivity))
+      if (hit && Date.now() - hit.lastScan < SCAN_TTL_MS) {
+        setResults(hit.results)
+        setLastScan(hit.lastScan)
+        setResultsTf(timeframe)
+        return true
+      }
+      return false
+    },
+    [sensitivity],
+  )
 
   const scan = useCallback(
     async (timeframe: string) => {
@@ -99,8 +127,16 @@ export function useScanner() {
         })
 
         out.sort((a, b) => b.score - a.score)
+        const now = Date.now()
+        // No cachear un escaneo DEGRADADO: si Binance limitó las peticiones durante el
+        // barrido (breaker activo) muchos pares fallaron; cachearlo serviría 5 min una lista
+        // parcial. Se muestra igualmente, pero no se persiste para forzar un re-escaneo.
+        if (binanceBannedForMs() === 0) {
+          scanCache.set(cacheKey(timeframe, sensitivity), { results: out, lastScan: now })
+        }
         setResults(out)
-        setLastScan(Date.now())
+        setLastScan(now)
+        setResultsTf(timeframe)
       } catch (e) {
         setError((e as Error)?.message ?? 'Error al escanear')
       } finally {
@@ -111,5 +147,5 @@ export function useScanner() {
     [sensitivity],
   )
 
-  return { results, scanning, progress, error, lastScan, scan }
+  return { results, scanning, progress, error, lastScan, resultsTf, scan, loadCached }
 }

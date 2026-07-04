@@ -116,4 +116,68 @@ describe('computeRiskPlan', () => {
     expect(computeRiskPlan(bearishImpulseDone(), 100, 0, 1)).toBeNull()
     expect(computeRiskPlan(bearishImpulseDone(), 100, 1000, 0)).toBeNull()
   })
+
+  it('corrección DEVELOPING: la rama "en desarrollo" tiene precedencia sobre la de corrección', () => {
+    // Onda C bajista en curso: el stop debe ser la INVALIDACIÓN de la onda en curso
+    // (extremo de B, 110), no el extremo de C (95, el último pivote). Si se reordenara
+    // el if/else (correction antes que developing), el stop sería 95 → por debajo de la
+    // entrada de un corto → el plan saldría null. Este test mata esa mutación.
+    const devAbc = mkScenario({
+      kind: 'correction',
+      pattern: 'zigzag',
+      direction: 'down',
+      developing: true,
+      invalidation: { price: 110, reason: '' },
+      target: { label: 'Zona objetivo C', low: 90, high: 96 },
+      pivots: [
+        mkPivot(0, 120, 'high'),
+        mkPivot(10, 100, 'low'),
+        mkPivot(20, 110, 'high'),
+        mkPivot(30, 95, 'low', false), // onda C en curso
+      ],
+    })
+    const plan = computeRiskPlan(devAbc, 105, 1000, 1)
+    expect(plan).not.toBeNull()
+    expect(plan!.bias).toBe('venta')
+    expect(plan!.stop).toBe(110) // invalidación de la onda en curso, NO el extremo de C (95)
+    expect(plan!.stopLabel).toBe('invalidación de la onda en curso')
+  })
+
+  it('precio ya más allá de la zona objetivo → sin objetivo, sin R:R, con aviso', () => {
+    // Largo con el precio (130) YA dentro de la zona [120, 140]: no hay recorrido.
+    const plan = computeRiskPlan(bearishImpulseDone(), 130, 1000, 1)
+    expect(plan).not.toBeNull()
+    expect(plan!.targetNear).toBeNull()
+    expect(plan!.targetFar).toBeNull()
+    expect(plan!.rr).toBeNull()
+    expect(plan!.warnings.some((w) => w.includes('dentro'))).toBe(true)
+  })
+
+  it('objetivo con borde conservador <= 0 (zona degenerada) → sin objetivo y SIN aviso de zona', () => {
+    const s = bearishImpulseDone()
+    s.target = { label: 'Zona', low: -5, high: 2 } // borde cercano (low, en largo) inválido
+    const plan = computeRiskPlan(s, 100, 1000, 1)
+    expect(plan!.targetNear).toBeNull()
+    expect(plan!.targetFar).toBeNull()
+    expect(plan!.rr).toBeNull()
+    // El guard de zona degenerada es silencioso: NO empuja el aviso de "ya está dentro".
+    expect(plan!.warnings.some((w) => w.includes('dentro'))).toBe(false)
+  })
+
+  it('R:R menor que 1 → aviso', () => {
+    const s = bearishImpulseDone()
+    s.invalidation = { price: 50, reason: '' } // stop lejano (dist 50)
+    s.target = { label: 'Zona', low: 105, high: 110 } // objetivo cercano (reward 5)
+    const plan = computeRiskPlan(s, 100, 1000, 1)
+    expect(plan!.rr).toBeLessThan(1) // 5 / 50 = 0.1
+    expect(plan!.warnings.some((w) => w.includes('R:R menor que 1'))).toBe(true)
+  })
+
+  it('stop a menos de 0,5% de la entrada → aviso "Stop muy cercano"', () => {
+    const s = bearishImpulseDone()
+    s.invalidation = { price: 99.6, reason: '' } // 0,4% de 100 (< 0,5%)
+    const plan = computeRiskPlan(s, 100, 1000, 1)
+    expect(plan!.stopDistPct).toBeLessThan(0.005)
+    expect(plan!.warnings.some((w) => w.includes('muy cercano'))).toBe(true)
+  })
 })

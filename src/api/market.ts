@@ -4,6 +4,7 @@
  *  - CoinGecko (market cap, cambio 24h; key Demo opcional vía VITE_COINGECKO_KEY).
  * Ambas permiten CORS, así que se llaman directo desde el navegador.
  */
+import { HttpError } from './binance'
 
 const CG_BASE = 'https://api.coingecko.com/api/v3'
 const CG_KEY = import.meta.env.VITE_COINGECKO_KEY
@@ -19,7 +20,7 @@ const COINGECKO_IDS: Record<string, string> = {
   AVAX: 'avalanche-2',
   DOGE: 'dogecoin',
   LINK: 'chainlink',
-  MATIC: 'matic-network',
+  POL: 'polygon-ecosystem-token', // MATIC migró a POL (sep-2024); 'matic-network' devuelve null
   DOT: 'polkadot',
   LTC: 'litecoin',
   TRX: 'tron',
@@ -60,7 +61,8 @@ export async function fetchFearGreed(): Promise<FearGreed> {
   const res = await fetch('https://api.alternative.me/fng/?limit=1', {
     signal: AbortSignal.timeout(10_000),
   })
-  if (!res.ok) throw new Error(`Fear&Greed → HTTP ${res.status}`)
+  // Con status para que la política global de reintentos respete 429/418 (no reintentar).
+  if (!res.ok) throw new HttpError(`Fear&Greed → HTTP ${res.status}`, res.status)
   const json = (await res.json()) as FngResponse
   const value = Number(json.data[0]?.value ?? NaN)
   return { value, ...classifyFearGreed(value) }
@@ -91,7 +93,7 @@ export async function fetchCoinMarket(base: string): Promise<CoinMarket | null> 
     headers,
     signal: AbortSignal.timeout(10_000),
   })
-  if (!res.ok) throw new Error(`CoinGecko → HTTP ${res.status}`)
+  if (!res.ok) throw new HttpError(`CoinGecko → HTTP ${res.status}`, res.status)
   const rows = (await res.json()) as CgMarketRow[]
   const row = Array.isArray(rows) ? rows[0] : undefined
   if (!row) return null

@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { useJournalStore } from '@/store/useJournalStore'
-import { journalStats, type JournalEntry, type TradeStatus } from '@/domain/journal'
+import { journalStats, gradeStats, MIN_GRADE_SAMPLE, type JournalEntry, type TradeStatus } from '@/domain/journal'
+import type { TradeGrade } from '@/domain/checklist'
 import { formatPrice } from '@/lib/format'
+
+const GRADE_COLOR: Record<TradeGrade, string> = {
+  A: 'border-green-500/40 bg-green-500/15 text-green-300',
+  B: 'border-amber-500/40 bg-amber-500/15 text-amber-300',
+  C: 'border-red-500/40 bg-red-500/15 text-red-300',
+}
 
 const PATTERN_LABEL: Record<string, string> = {
   impulso: 'Impulso',
@@ -51,6 +58,7 @@ function JournalRow({ e }: { e: JournalEntry }) {
           {PATTERN_LABEL[e.pattern] ?? e.pattern}
         </span>
         <span
+          title={e.bias === 'compra' ? 'compra (posición larga)' : 'venta (posición corta)'}
           className={
             'rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ' +
             (e.bias === 'compra'
@@ -58,11 +66,19 @@ function JournalRow({ e }: { e: JournalEntry }) {
               : 'border-red-500/30 bg-red-500/15 text-red-300')
           }
         >
-          {e.bias === 'compra' ? 'largo' : 'corto'}
+          {e.bias === 'compra' ? 'compra · largo' : 'venta · corto'}
         </span>
         {e.developing && (
           <span className="rounded bg-amber-950/40 px-1.5 py-0.5 text-[9px] text-amber-300">
             en desarrollo
+          </span>
+        )}
+        {e.checklist && (
+          <span
+            className={'rounded border px-1.5 py-0.5 text-[10px] font-bold ' + GRADE_COLOR[e.checklist.grade]}
+            title={e.checklist.flags.map((f) => f.detail).join(' · ')}
+          >
+            Grado {e.checklist.grade}
           </span>
         )}
         <span
@@ -191,6 +207,44 @@ export function JournalView() {
               </div>
               <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
                 Tu historial real con muestra pequeña: orientativo, no garantiza resultados futuros.
+              </p>
+            </div>
+          )}
+
+          {entries.some((e) => e.checklist) && (
+            <div className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                Resultados por grado (tu historial)
+              </span>
+              <div className="mt-1.5 space-y-1">
+                {gradeStats(entries)
+                  .filter((g) => g.n > 0)
+                  .map((g) => (
+                    <div key={g.grade} className="flex items-center gap-2 text-[11px]">
+                      <span
+                        className={'w-16 rounded border px-1.5 py-0.5 text-center text-[10px] font-bold ' + GRADE_COLOR[g.grade]}
+                      >
+                        Grado {g.grade}
+                      </span>
+                      <span className="flex-1 text-slate-400">
+                        {g.winRate != null ? (
+                          <>
+                            {Math.round(g.winRate * 100)}% aciertos ·{' '}
+                            {g.expectancyR != null ? `${g.expectancyR >= 0 ? '+' : ''}${g.expectancyR.toFixed(2)}R medio` : '—'}
+                          </>
+                        ) : (
+                          <span className="text-slate-500">
+                            {g.decided}/{MIN_GRADE_SAMPLE} decididas · muestra insuficiente
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-slate-500">{g.n} anotadas</span>
+                    </div>
+                  ))}
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                Tu propia validación: ¿rinden mejor tus entradas de grado A? Requiere ≥{MIN_GRADE_SAMPLE}{' '}
+                operaciones decididas por grado; es disciplina, no una probabilidad del método.
               </p>
             </div>
           )}

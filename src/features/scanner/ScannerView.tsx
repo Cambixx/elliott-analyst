@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TIMEFRAMES } from '@/types/market'
+import { TIMEFRAMES, type Timeframe } from '@/types/market'
 import { formatPrice } from '@/lib/format'
 import type { Bias } from '@/domain/elliott/opportunity'
 import type { Confidence, ScenarioPattern } from '@/domain/elliott/types'
@@ -31,11 +31,11 @@ function relTime(ts: number): string {
   return `hace ${Math.floor(m / 60)} h`
 }
 
-function ResultRow({ r, onSelect }: { r: ScanResult; onSelect: (s: string) => void }) {
+function ResultRow({ r, onSelect }: { r: ScanResult; onSelect: () => void }) {
   const up = (r.changePct ?? 0) >= 0
   return (
     <button
-      onClick={() => onSelect(r.symbol)}
+      onClick={onSelect}
       className="grid w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-slate-700/60 bg-slate-800/40 p-3 text-left transition-colors hover:border-slate-600"
     >
       <div className="min-w-0">
@@ -69,7 +69,10 @@ function ResultRow({ r, onSelect }: { r: ScanResult; onSelect: (s: string) => vo
         </div>
         <div className="mt-0.5 flex items-center justify-end gap-2 text-xs">
           <span className="text-slate-500">{PATTERN_LABEL[r.pattern]}</span>
-          <span className="font-mono text-slate-400">
+          <span
+            className="font-mono text-slate-400"
+            title={`Score interno del motor: ${r.score}/100 (solo para ordenar resultados, no es una probabilidad).`}
+          >
             score <span className="text-slate-200">{r.score}</span>
           </span>
           <span className={'font-semibold ' + CONF_STYLE[r.confidence]}>{r.confidence}</span>
@@ -79,17 +82,24 @@ function ResultRow({ r, onSelect }: { r: ScanResult; onSelect: (s: string) => vo
   )
 }
 
-export function ScannerView({ onSelectPair }: { onSelectPair: (symbol: string) => void }) {
-  const { results, scanning, progress, error, lastScan, scan } = useScanner()
-  const [timeframe, setTimeframe] = useState('4h')
+export function ScannerView({
+  onSelectPair,
+}: {
+  onSelectPair: (symbol: string, tf: Timeframe) => void
+}) {
+  const { results, scanning, progress, error, lastScan, resultsTf, scan, loadCached } = useScanner()
+  const [timeframe, setTimeframe] = useState<Timeframe>('4h')
   const [onlyActionable, setOnlyActionable] = useState(false)
 
-  // Escanea al entrar y cuando cambia la temporalidad.
+  // Al entrar/cambiar de temporalidad: reutiliza la caché fresca (volver a la pestaña no
+  // relanza 40 peticiones); solo escanea si no hay caché válida.
   useEffect(() => {
-    void scan(timeframe)
-  }, [timeframe, scan])
+    if (!loadCached(timeframe)) void scan(timeframe)
+  }, [timeframe, scan, loadCached])
 
   const shown = onlyActionable ? results.filter((r) => r.actionable) : results
+  // Los resultados visibles son de OTRA temporalidad mientras se re-escanea → avísalo.
+  const staleTf = scanning && resultsTf && resultsTf !== timeframe ? resultsTf : null
 
   return (
     <section className="flex flex-1 flex-col overflow-visible p-3 sm:p-4 lg:min-h-0 lg:overflow-y-auto">
@@ -141,6 +151,12 @@ export function ScannerView({ onSelectPair }: { onSelectPair: (symbol: string) =
 
       {error && <p className="text-sm text-red-400">Error: {error}</p>}
 
+      {staleTf && (
+        <p className="mb-2 rounded border border-amber-700/40 bg-amber-950/20 px-2 py-1 text-[11px] text-amber-200/90">
+          Mostrando el escaneo anterior ({staleTf}) mientras se re-escanea en {timeframe}…
+        </p>
+      )}
+
       {scanning && results.length === 0 ? (
         <p className="text-sm text-slate-400">Escaneando los pares más líquidos…</p>
       ) : shown.length === 0 ? (
@@ -151,7 +167,7 @@ export function ScannerView({ onSelectPair }: { onSelectPair: (symbol: string) =
       ) : (
         <div className="flex flex-col gap-2">
           {shown.map((r) => (
-            <ResultRow key={r.symbol} r={r} onSelect={onSelectPair} />
+            <ResultRow key={r.symbol} r={r} onSelect={() => onSelectPair(r.symbol, timeframe)} />
           ))}
         </div>
       )}

@@ -17,7 +17,7 @@ const BASE = (import.meta.env.VITE_BINANCE_PROXY ?? 'https://data-api.binance.vi
 const WS_HOST = 'wss://data-stream.binance.vision:443'
 
 /** Pares mostrados primero (los más líquidos). El resto se descubre vía exchangeInfo. */
-const PREFERRED = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'DOGE', 'LINK', 'MATIC']
+const PREFERRED = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'AVAX', 'DOGE', 'LINK', 'POL']
 
 /** Lista de respaldo por si exchangeInfo falla. */
 export const FALLBACK_PAIRS: UsdcPair[] = PREFERRED.map((base) => ({
@@ -32,22 +32,50 @@ interface ExchangeInfoSymbol {
   quoteAsset: string
 }
 
-/** Tupla cruda de Binance: [openTime, open, high, low, close, volume, closeTime, ...] */
-type RawKline = [number, string, string, string, string, string, number, ...unknown[]]
+/**
+ * Tupla cruda de Binance:
+ * [0 openTime, 1 open, 2 high, 3 low, 4 close, 5 volume, 6 closeTime, 7 quoteVolume,
+ *  8 numTrades, 9 takerBuyBaseVolume, 10 takerBuyQuoteVolume, 11 ignore]
+ */
+type RawKline = [number, string, string, string, string, string, number, string, number, string, ...unknown[]]
 
 /** Error de red con el código HTTP, para que el retry de TanStack pueda decidir. */
 export class HttpError extends Error {
   constructor(
     message: string,
     public status: number,
+    /** Espera sugerida antes de reintentar (ms), derivada de Retry-After en 429/418. */
+    public retryAfterMs?: number,
   ) {
     super(message)
   }
 }
 
+/**
+ * Circuit breaker MÓDULO-GLOBAL: cuando Binance devuelve 429 (rate-limit) o 418 (ban por
+ * IP), seguir martilleando el endpoint PROLONGA el bloqueo. Guardamos hasta cuándo estamos
+ * vetados y rechazamos localmente (sin salir a red) hasta que expire. Cubre de una vez a
+ * useQuery, al escáner y al monitor de alertas, que comparten este cliente.
+ */
+let bannedUntil = 0
+/** ms restantes de veto de Binance (0 si no hay). Para que la UI lo comunique. */
+export function binanceBannedForMs(): number {
+  return Math.max(0, bannedUntil - Date.now())
+}
+
 async function getJson<T>(path: string): Promise<T> {
+  const wait = bannedUntil - Date.now()
+  if (wait > 0) {
+    throw new HttpError(`Binance limitado; reintenta en ${Math.ceil(wait / 1000)}s`, 429, wait)
+  }
   const res = await fetch(`${BASE}${path}`, { signal: AbortSignal.timeout(10_000) })
   if (!res.ok) {
+    if (res.status === 429 || res.status === 418) {
+      const header = Number(res.headers.get('Retry-After'))
+      const retryAfterMs = Number.isFinite(header) && header > 0 ? header * 1000 : 60_000
+      bannedUntil = Date.now() + retryAfterMs
+      throw new HttpError(`Binance ${path} → HTTP ${res.status}`, res.status, retryAfterMs)
+    }
     throw new HttpError(`Binance ${path} → HTTP ${res.status}`, res.status)
   }
   return res.json() as Promise<T>
@@ -80,6 +108,10 @@ export async function fetchKlines(
   // la ÚLTIMA. Por construcción todas menos la última están cerradas (no dependen
   // del reloj del cliente); solo la última se decide por su closeTime (k[6]) vs ahora.
   // Así un reloj adelantado, como mucho, afecta a una sola vela, no a todo el set.
+  // MARGEN: exigimos que hayan pasado ≥ CLOSE_MARGIN_MS desde el closeTime para
+  // marcarla cerrada. Vuelca el error de un reloj adelantado hacia el lado SEGURO
+  // (una vela recién cerrada tarda unos segundos en contarse como tal), en vez de
+  // marcar cerrada una vela aún en formación → sin look-ahead por desvío de reloj.
   const now = Date.now()
   const lastIdx = raw.length - 1
   return raw.map((k, i) => ({
@@ -89,9 +121,14 @@ export async function fetchKlines(
     low: +k[3],
     close: +k[4],
     volume: +k[5],
-    closed: i < lastIdx ? true : k[6] < now,
+    takerBuyVolume: +k[9], // compra agresora (base): base del delta de flujo real
+    closed: i < lastIdx ? true : k[6] < now - CLOSE_MARGIN_MS,
   }))
 }
+
+/** Margen conservador (ms) para considerar cerrada la última vela: absorbe un desvío
+ *  moderado del reloj del cliente sin degradar la frescura de forma perceptible. */
+const CLOSE_MARGIN_MS = 3_000
 
 export interface Ticker {
   symbol: string
@@ -144,7 +181,8 @@ interface KlineWsMessage {
     h: string
     l: string
     c: string
-    v: string
+    v: string // base volume
+    V: string // taker buy base volume (compra agresora)
     x: boolean // is closed
   }
 }
@@ -165,8 +203,31 @@ export function subscribeKline(
   let ws: WebSocket | null = null
   let closedByUser = false
   let retries = 0
+  let msgId = 1
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let watchdog: ReturnType<typeof setTimeout> | undefined
+  let keepalive: ReturnType<typeof setInterval> | undefined
+
+  // Keepalive de aplicación: en pares ILÍQUIDOS puede no llegar ninguna vela en >60s
+  // y el watchdog mataría una conexión SANA (bucle de reconexión perpetuo). Pedimos la
+  // lista de suscripciones cada 25s; la respuesta de Binance dispara onmessage (que
+  // rearma el watchdog) y cae en el catch de payload no-kline sin efectos.
+  const stopKeepalive = () => {
+    if (keepalive) clearInterval(keepalive)
+    keepalive = undefined
+  }
+  const startKeepalive = () => {
+    stopKeepalive()
+    keepalive = setInterval(() => {
+      try {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ method: 'LIST_SUBSCRIPTIONS', id: msgId++ }))
+        }
+      } catch {
+        /* noop */
+      }
+    }, 25_000)
+  }
 
   const armWatchdog = () => {
     if (watchdog) clearTimeout(watchdog)
@@ -184,6 +245,7 @@ export function subscribeKline(
     ws.onopen = () => {
       retries = 0
       armWatchdog()
+      startKeepalive()
     }
     ws.onmessage = (event) => {
       armWatchdog()
@@ -197,6 +259,7 @@ export function subscribeKline(
           low: +k.l,
           close: +k.c,
           volume: +k.v,
+          takerBuyVolume: +k.V,
           closed: k.x,
         })
       } catch {
@@ -212,6 +275,7 @@ export function subscribeKline(
     }
     ws.onclose = () => {
       if (watchdog) clearTimeout(watchdog)
+      stopKeepalive()
       if (closedByUser) return
       const delay = Math.min(30_000, 1000 * 2 ** retries) + Math.random() * 1000
       retries++
@@ -225,6 +289,7 @@ export function subscribeKline(
     closedByUser = true
     if (reconnectTimer) clearTimeout(reconnectTimer)
     if (watchdog) clearTimeout(watchdog)
+    stopKeepalive()
     try {
       ws?.close()
     } catch {

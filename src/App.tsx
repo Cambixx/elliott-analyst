@@ -5,6 +5,7 @@ import { useLiveCandle } from '@/features/chart/useLiveCandle'
 import { useElliott } from '@/features/analysis/useElliott'
 import { useHigherTimeframe } from '@/features/analysis/useHigherTimeframe'
 import { CandleChart } from '@/features/chart/CandleChart'
+import { ChartLegend } from '@/features/chart/ChartLegend'
 import { PairSelector } from '@/features/pair-selector/PairSelector'
 import { FavoritesBar } from '@/features/pair-selector/FavoritesBar'
 import { TimeframeSelector } from '@/features/timeframe-selector/TimeframeSelector'
@@ -22,6 +23,8 @@ import { anchoredVwap } from '@/domain/vwap'
 import { computeForecast } from '@/domain/elliott/forecast'
 import { supportResistance, classifyLevel } from '@/domain/elliott/levels'
 import { computeATR } from '@/domain/elliott/atr'
+import { computeRegime } from '@/domain/indicators/adx'
+import { computeTargetClusters } from '@/domain/elliott/targetClusters'
 import type { SrDrawItem } from '@/features/chart/CandleChart'
 import { formatPrice } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
@@ -38,6 +41,7 @@ function IndicatorToggle({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={
         'rounded px-2 py-1 text-xs font-semibold transition-colors ' +
         (active ? 'bg-slate-700 text-cyan-300' : 'text-slate-400 hover:bg-slate-800')
@@ -58,16 +62,20 @@ export default function App() {
     showRsi,
     showMacd,
     showForecast,
+    showAlternatives,
+    showLevels,
     toggleRsi,
     toggleMacd,
     toggleForecast,
+    toggleAlternatives,
+    toggleLevels,
   } = useMarketStore()
   const { data: candles, isLoading, isError, error } = useKlines(symbol, interval)
   const liveCandle = useLiveCandle(symbol, interval)
   const now = useNow()
   const dataQuality = useDataQuality(candles, interval, now)
   const { scenarios, pivots } = useElliott(candles, sensitivity)
-  const backtest = useBacktest(candles, sensitivity)
+  const backtest = useBacktest(candles, sensitivity, `${symbol}:${interval}`)
   const higher = useHigherTimeframe(symbol, interval, sensitivity)
   const { checkNow, checking } = useAlertMonitor()
   const [focusedId, setFocusedId] = useState<string | null>(null)
@@ -81,34 +89,51 @@ export default function App() {
   }, [symbol, interval, sensitivity])
 
   const lastPrice = liveCandle?.close ?? candles?.at(-1)?.close
-  // Precio de la última vela CERRADA (para el cross-check con CoinGecko, que es agregado/retardado).
-  const closedPrice = candles?.filter((c) => c.closed).at(-1)?.close
   const base = symbol.replace(/USDC$/, '')
 
   // Click en una tarjeta aísla ese escenario en el gráfico; por defecto se dibujan
   // TODOS los escenarios detectados: el primario (más probable) a plena opacidad
   // y los alternativos atenuados, para ver visualmente los posibles escenarios.
   const focused = focusedId ? (scenarios.find((s) => s.id === focusedId) ?? null) : null
+  // Foco EFECTIVO: si el escenario aislado ya no existe (los ids son estables por
+  // timestamp, pero un cambio real de estructura puede eliminarlo), se ignora el foco
+  // colgado. Un único valor coherente para el gráfico Y el panel (calculadora/derivados),
+  // evitando que el panel diga "aislado" mientras la calculadora usa el primario.
+  const effectiveFocusedId = focused ? focusedId : null
   // Estable por contenido: evita que el forecast (useMemo) se recalcule en cada render.
+  // `drawnScenarios` = TODOS los conteos considerados (para fibZone/convergencia, que
+  // razonan sobre el conjunto). `chartScenarios` = lo que se DIBUJA como ondas en el
+  // gráfico: por defecto SOLO el primario (limpio); los alternativos entran con su toggle.
   const drawnScenarios = useMemo(() => (focused ? [focused] : scenarios), [focused, scenarios])
+  const chartScenarios = useMemo(
+    () => (focused ? [focused] : showAlternatives ? scenarios : scenarios.slice(0, 1)),
+    [focused, scenarios, showAlternatives],
+  )
+
+  // Velas cerradas: memoizado (dependencia de otros memos; filtrar por render los rompería).
+  const closedCandles = useMemo(() => candles?.filter((c) => c.closed) ?? [], [candles])
+  // Precio de la última vela CERRADA (cross-check con CoinGecko, agregado/retardado).
+  const closedPrice = closedCandles.at(-1)?.close
+  // Régimen de mercado (ADX + percentil ATR): contexto global descriptivo, no señal.
+  const regime = useMemo(() => computeRegime(closedCandles), [closedCandles])
 
   // Zona de retroceso de Fibonacci del mejor impulso/diagonal ya completado.
   // Se calcula sobre lo que realmente se dibuja: al aislar un escenario que no
-  // es ese impulso, la zona desaparece con él (coherencia visual).
-  const fibZone = (() => {
+  // es ese impulso, la zona desaparece con él (coherencia visual). Memoizado para no
+  // recalcular (~cientos de velas) en cada tick del WebSocket.
+  const fibZone = useMemo(() => {
     if (!candles || candles.length < 2) return null
     const motive = drawnScenarios.find((s) => s.kind === 'impulse' && !s.developing)
     return motive ? computeFibZone(motive, candles) : null
-  })()
+  }, [candles, drawnScenarios])
 
   // VWAP anclado al origen del conteo que se dibuja (referencia institucional).
-  // Memoizado: es dependencia de otros memos (S/R) y filtrar en cada render los rompería.
-  const closedCandles = useMemo(() => candles?.filter((c) => c.closed) ?? [], [candles])
-  const vwap = (() => {
+  // Memoizado: recorrer todas las velas cerradas por tick era el mayor coste no trivial.
+  const vwap = useMemo(() => {
     const anchor = drawnScenarios[0]?.pivots[0]?.index
     if (anchor == null || closedCandles.length < 2) return null
     return anchoredVwap(closedCandles, anchor)
-  })()
+  }, [drawnScenarios, closedCandles])
 
   // Soportes/resistencias de la estructura (clustering de pivotes del ZigZag),
   // clasificados respecto al precio actual para colorearlos en el gráfico.
@@ -117,8 +142,15 @@ export default function App() {
   // la proyección sigue a ese conteo y no al primario global. El impulso naciente se
   // filtra por el sesgo del marco superior dentro de computeForecast.
   const forecast = useMemo(
-    () => (showForecast ? computeForecast(drawnScenarios, pivots, higher.bias) : null),
-    [showForecast, drawnScenarios, pivots, higher.bias],
+    () => (showForecast ? computeForecast(chartScenarios, pivots, higher.bias) : null),
+    [showForecast, chartScenarios, pivots, higher.bias],
+  )
+
+  // Zonas de convergencia de objetivos: dónde apuntan a la vez varios de los conteos
+  // dibujados (geometría compartida, no probabilidad). Se computa sobre lo que se dibuja.
+  const targetClusters = useMemo(
+    () => computeTargetClusters(drawnScenarios, forecast),
+    [drawnScenarios, forecast],
   )
 
   // Tolerancia de agrupado ADAPTATIVA a la volatilidad: ~la mitad de un ATR14 relativo,
@@ -164,6 +196,7 @@ export default function App() {
             <button
               key={v}
               onClick={() => setView(v)}
+              aria-pressed={view === v}
               className={
                 'rounded px-2.5 py-1 text-xs font-semibold transition-colors ' +
                 (view === v ? 'bg-cyan-500 text-slate-900' : 'text-slate-300 hover:bg-slate-700')
@@ -177,9 +210,19 @@ export default function App() {
         <PairSelector />
         <TimeframeSelector />
 
+        {/* Osciladores en paneles inferiores. */}
         <div className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 p-0.5">
           <IndicatorToggle label="RSI" active={showRsi} onClick={toggleRsi} />
           <IndicatorToggle label="MACD" active={showMacd} onClick={toggleMacd} />
+        </div>
+        {/* Capas del gráfico: por defecto solo el conteo primario; el resto se activa aquí. */}
+        <div className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 p-0.5">
+          <IndicatorToggle
+            label="Alternativos"
+            active={showAlternatives}
+            onClick={toggleAlternatives}
+          />
+          <IndicatorToggle label="Niveles" active={showLevels} onClick={toggleLevels} />
           <IndicatorToggle label="Proyección" active={showForecast} onClick={toggleForecast} />
         </div>
 
@@ -190,6 +233,7 @@ export default function App() {
               <button
                 key={p.label}
                 onClick={() => setSensitivity(p.k)}
+                aria-pressed={sensitivity === p.k}
                 className={
                   'rounded px-2 py-1 text-xs font-semibold transition-colors ' +
                   (sensitivity === p.k
@@ -223,8 +267,9 @@ export default function App() {
 
       {view === 'scanner' ? (
         <ScannerView
-          onSelectPair={(s) => {
+          onSelectPair={(s, tf) => {
             setSymbol(s)
+            setInterval(tf) // abrir el par en la MISMA temporalidad que escaneó el escáner
             setView('analysis')
           }}
         />
@@ -232,34 +277,54 @@ export default function App() {
         <JournalView />
       ) : (
         <main className="flex flex-1 flex-col lg:min-h-0 lg:flex-row">
-          <section className="relative h-[55vh] lg:h-auto lg:min-h-0 lg:flex-1">
-          {isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-slate-400">
-              Cargando velas…
-            </div>
-          )}
-          {isError && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center px-4 text-center text-sm text-red-400">
-              Error al cargar datos: {(error as Error)?.message}
-            </div>
-          )}
-          <CandleChart
-            candles={candles ?? []}
-            datasetKey={`${symbol}:${interval}`}
-            liveCandle={liveCandle}
-            scenarios={drawnScenarios}
-            fibZone={fibZone}
-            vwap={vwap}
-            srLevels={srLevels}
-            forecast={forecast}
-            showRsi={showRsi}
-            showMacd={showMacd}
+          <section className="relative flex h-[55vh] flex-col lg:h-auto lg:min-h-0 lg:flex-1">
+          <ChartLegend
+            primary={chartScenarios[0]}
+            alternativesOn={showAlternatives && !focused}
+            fib={fibZone != null}
+            levelsOn={showLevels}
+            forecastOn={forecast != null}
           />
+          <div className="relative min-h-0 flex-1">
+            {isLoading && !candles && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center text-sm text-slate-400">
+                Cargando velas…
+              </div>
+            )}
+            {/* Solo tapamos el gráfico si NO hay velas que mostrar. Si un refetch de fondo
+                falla pero ya teníamos datos, no ocultamos un gráfico funcional: un aviso
+                no bloqueante arriba basta (la frescura la comunica el badge de cabecera). */}
+            {isError && !candles && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center px-4 text-center text-sm text-red-400">
+                Error al cargar datos: {(error as Error)?.message}
+              </div>
+            )}
+            {isError && candles && (
+              <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded border border-amber-700/50 bg-amber-950/70 px-2 py-1 text-[11px] text-amber-200">
+                No se pudo actualizar; mostrando los últimos datos disponibles.
+              </div>
+            )}
+            <CandleChart
+              candles={candles ?? []}
+              datasetKey={`${symbol}:${interval}`}
+              liveCandle={liveCandle}
+              scenarios={chartScenarios}
+              fibZone={fibZone}
+              vwap={showLevels ? vwap : null}
+              srLevels={showLevels ? srLevels : []}
+              targetClusters={showLevels ? targetClusters : []}
+              forecast={forecast}
+              showRsi={showRsi}
+              showMacd={showMacd}
+            />
+          </div>
         </section>
 
         <AnalysisPanel
           scenarios={scenarios}
           higher={higher}
+          regime={regime}
+          clusters={targetClusters}
           base={base}
           symbol={symbol}
           timeframe={interval}
@@ -269,9 +334,10 @@ export default function App() {
           forecast={forecast}
           lastPrice={lastPrice}
           closedPrice={closedPrice}
-          focusedId={focusedId}
+          focusedId={effectiveFocusedId}
           backtest={backtest}
           onSelect={(id) => setFocusedId((prev) => (prev === id ? null : id))}
+          dataStatus={isLoading && !candles ? 'loading' : isError && !candles ? 'error' : 'ready'}
           alertsSlot={
             <AlertsCard currentSymbol={symbol} checkNow={checkNow} checking={checking} />
           }

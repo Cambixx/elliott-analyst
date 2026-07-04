@@ -11,6 +11,12 @@ interface MarketState {
   showMacd: boolean
   /** Proyección hipotética de las ondas que faltan (3?/4?/5?...). Apagado por defecto. */
   showForecast: boolean
+  /** Conteos ALTERNATIVOS en el gráfico (además del primario). Apagado por defecto:
+   *  el gráfico arranca limpio con solo el conteo primario. */
+  showAlternatives: boolean
+  /** Capas de niveles secundarios en el gráfico (VWAP + soportes/resistencias +
+   *  convergencia de objetivos). Apagado por defecto para no saturar. */
+  showLevels: boolean
   /** Pares marcados como favoritos (acceso rápido en la barra de favoritos). */
   favorites: string[]
   setSymbol: (symbol: string) => void
@@ -19,6 +25,8 @@ interface MarketState {
   toggleRsi: () => void
   toggleMacd: () => void
   toggleForecast: () => void
+  toggleAlternatives: () => void
+  toggleLevels: () => void
   toggleFavorite: (symbol: string) => void
 }
 
@@ -38,6 +46,8 @@ export const useMarketStore = create<MarketState>()(
       showRsi: false,
       showMacd: false,
       showForecast: false,
+      showAlternatives: false,
+      showLevels: false,
       favorites: ['BTCUSDC', 'ETHUSDC', 'SOLUSDC', 'BNBUSDC'],
       setSymbol: (symbol) => set({ symbol }),
       setInterval: (interval) => set({ interval }),
@@ -45,6 +55,8 @@ export const useMarketStore = create<MarketState>()(
       toggleRsi: () => set((s) => ({ showRsi: !s.showRsi })),
       toggleMacd: () => set((s) => ({ showMacd: !s.showMacd })),
       toggleForecast: () => set((s) => ({ showForecast: !s.showForecast })),
+      toggleAlternatives: () => set((s) => ({ showAlternatives: !s.showAlternatives })),
+      toggleLevels: () => set((s) => ({ showLevels: !s.showLevels })),
       toggleFavorite: (symbol) =>
         set((s) => ({
           favorites: s.favorites.includes(symbol)
@@ -61,6 +73,8 @@ export const useMarketStore = create<MarketState>()(
         showRsi: s.showRsi,
         showMacd: s.showMacd,
         showForecast: s.showForecast,
+        showAlternatives: s.showAlternatives,
+        showLevels: s.showLevels,
         favorites: s.favorites,
       }),
     },

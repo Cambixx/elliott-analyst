@@ -33,9 +33,21 @@ class FapiError extends Error {
   }
 }
 
+// Circuit breaker módulo-global del cliente de futuros (ver binance.ts): ante 429/418
+// dejamos de golpear el endpoint hasta que expire el veto, para no prolongar el ban.
+let bannedUntil = 0
+
 async function getJson<T>(url: string): Promise<T> {
+  const wait = bannedUntil - Date.now()
+  if (wait > 0) throw new FapiError(`Binance Futures limitado; reintenta en ${Math.ceil(wait / 1000)}s`, 429)
   const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
-  if (!res.ok) throw new FapiError(`Binance Futures → HTTP ${res.status}`, res.status)
+  if (!res.ok) {
+    if (res.status === 429 || res.status === 418) {
+      const header = Number(res.headers.get('Retry-After'))
+      bannedUntil = Date.now() + (Number.isFinite(header) && header > 0 ? header * 1000 : 60_000)
+    }
+    throw new FapiError(`Binance Futures → HTTP ${res.status}`, res.status)
+  }
   return res.json() as Promise<T>
 }
 
@@ -95,8 +107,13 @@ export interface Derivatives {
 export async function fetchDerivatives(perp: string): Promise<Derivatives> {
   const [pi, oih] = await Promise.all([
     getJson<RawPremiumIndex>(`${FAPI}/fapi/v1/premiumIndex?symbol=${perp}`),
-    // ~5 días de open interest en velas de 4h para juzgar la tendencia.
-    getJson<RawOiHist[]>(`${FAPI}/futures/data/openInterestHist?symbol=${perp}&period=4h&limit=30`),
+    // ~5 días de open interest en velas de 4h para juzgar la tendencia. Su fallo se
+    // AÍSLA (.catch→[]): un HTTP de error en el histórico de OI degrada a "s/d" (idéntico
+    // al caso 200+{code,msg} ya soportado), sin descartar también el funding y ocultar
+    // toda la tarjeta de derivados.
+    getJson<RawOiHist[]>(`${FAPI}/futures/data/openInterestHist?symbol=${perp}&period=4h&limit=30`).catch(
+      () => [] as RawOiHist[],
+    ),
   ])
 
   const oiHistory: OiPoint[] = (Array.isArray(oih) ? oih : [])

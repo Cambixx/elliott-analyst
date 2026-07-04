@@ -68,25 +68,27 @@ export function vsaTurnConfirms(
   candles: Candle[],
   turn: Pivot,
   lookback = LOOKBACK,
-): { met: boolean; detail: string } {
+): { met: boolean; detail: string; readable: boolean } {
   // Colisión con wick_spike: la geometría de "mecha que rechaza el extremo" es la misma
-  // que el motor ya marca como baja fiabilidad. No premiamos lo que en otro plano penaliza.
+  // que el motor ya marca como baja fiabilidad. Se LEE (readable) pero no cuenta como
+  // clímax (met:false); es una lectura real, no una ausencia de dato.
   if (turn.flag === 'wick_spike') {
-    return { met: false, detail: 'El giro se formó en una mecha desproporcionada: no cuenta como clímax VSA.' }
+    return { met: false, readable: true, detail: 'El giro se formó en una mecha desproporcionada: no cuenta como clímax VSA.' }
   }
   const i = turn.index
-  // Guard defensivo de rango: el pipeline real acota turn.index a [0, len-1] (zigzag),
-  // pero leer candles[i] fuera de rango lanzaría; degradamos en su lugar (benigno).
+  // Casos de DATO AUSENTE (fuera de rango / ventana incompleta / doji): readable:false →
+  // el llamador OMITE el factor (como hace 'subondas'), en vez de contarlo como no-cumplido.
+  // Así una historia corta (TF alto) no penaliza el score de forma incomparable.
   if (i < 0 || i >= candles.length) {
-    return { met: false, detail: 'Índice de giro fuera de rango: lectura VSA indefinida.' }
+    return { met: false, readable: false, detail: 'Índice de giro fuera de rango: lectura VSA indefinida.' }
   }
   const lo = Math.max(0, i - lookback)
   if (i - lo < lookback) {
-    return { met: false, detail: 'Datos de volumen insuficientes para leer el giro.' }
+    return { met: false, readable: false, detail: 'Datos de volumen insuficientes para leer el giro.' }
   }
   const clv = closeLocationValue(candles[i])
   if (clv === null) {
-    return { met: false, detail: 'Vela del giro sin rango (doji): lectura VSA indefinida.' }
+    return { met: false, readable: false, detail: 'Vela del giro sin rango (doji): lectura VSA indefinida.' }
   }
   const win = candles.slice(lo, i) // [i-lookback, i-1] → excluye la vela i y todo el futuro
   const volPct = percentileRank(
@@ -100,8 +102,16 @@ export function vsaTurnConfirms(
   const isHigh = turn.type === 'high'
   const rejected = isHigh ? clv <= CLV_REJECT : clv >= 1 - CLV_REJECT
   const met = volPct >= VOL_HI && rejected
+  // Flujo agresor REAL del giro (si Binance lo trae): compras − ventas de la propia vela.
+  // Solo informa el `detail` (refuerza la lectura de CLV con el dato directo de quién ganó
+  // la barra); NO cambia `met` → no desplaza la distribución del score.
+  const tbv = candles[i].takerBuyVolume
+  const flowTag =
+    tbv != null && Number.isFinite(tbv)
+      ? ` · flujo ${2 * tbv - candles[i].volume >= 0 ? 'comprador' : 'vendedor'}`
+      : ''
   const detail = met
-    ? `Vol p${Math.round(volPct * 100)} en el giro con cierre rechazado (CLV ${clv.toFixed(2)}, spread p${Math.round(sprPct * 100)}): posible distribución/absorción.`
-    : `Sin firma VSA de giro (vol p${Math.round(volPct * 100)}, CLV ${clv.toFixed(2)}).`
-  return { met, detail }
+    ? `Vol p${Math.round(volPct * 100)} en el giro con cierre rechazado (CLV ${clv.toFixed(2)}, spread p${Math.round(sprPct * 100)})${flowTag}: posible distribución/absorción.`
+    : `Sin firma VSA de giro (vol p${Math.round(volPct * 100)}, CLV ${clv.toFixed(2)}${flowTag}).`
+  return { met, detail, readable: true }
 }

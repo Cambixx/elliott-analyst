@@ -10,6 +10,7 @@ export function TimeframeSelector() {
         <button
           key={tf}
           onClick={() => setInterval(tf)}
+          aria-pressed={interval === tf}
           className={
             'rounded px-2.5 py-1 text-sm font-semibold transition-colors ' +
             (interval === tf

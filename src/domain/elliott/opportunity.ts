@@ -68,8 +68,10 @@ export function deriveOpportunity(
   if (!fire) return null
 
   const reasons: string[] = []
-  if (conf === 'alta') reasons.push('conteo de confluencia alta')
-  else if (conf === 'media') reasons.push('conteo de confluencia media')
+  // "confianza" (no "confluencia"): es scenario.confidence, el mismo término del badge
+  // del panel. Decir "confluencia" contradecía el % de Confluencia visible en la tarjeta.
+  if (conf === 'alta') reasons.push('conteo de confianza alta')
+  else if (conf === 'media') reasons.push('conteo de confianza media')
   if (inTarget && targetReason) reasons.push(targetReason)
   if (nearInvalidation) reasons.push('precio junto al nivel de invalidación')
 

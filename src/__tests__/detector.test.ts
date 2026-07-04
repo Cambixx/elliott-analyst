@@ -131,3 +131,20 @@ describe('plana expandida', () => {
     expect(flat!.invalidation.reason).toContain('onda B')
   })
 })
+
+describe('ids de escenario estables por timestamp (regresión de auditoría)', () => {
+  it('el id se compone de los TIMESTAMPS de los pivotes, no de sus índices', () => {
+    // Los índices se desplazan al deslizarse la ventana de 1000 velas → un id por índice
+    // cambiaba en cada vuelta de vela (perdía el foco aislado y re-encuadraba el chart).
+    // Timestamps absolutos = id estable para una misma estructura.
+    const candles = candlesFromPath([100, 120, 110, 150, 140, 170], 6)
+    const { scenarios } = detectScenarios(candles, 2)
+    const s = scenarios[0]
+    expect(s).toBeDefined()
+    const last = s.pivots[s.pivots.length - 1]
+    // El id termina en el TIMESTAMP del último pivote (grande), no en su índice (pequeño).
+    expect(s.id.endsWith(String(last.timestamp))).toBe(true)
+    expect(last.timestamp).not.toBe(last.index)
+    expect(s.id.endsWith(`-${last.index}`)).toBe(false)
+  })
+})

@@ -7,6 +7,7 @@ import { impulseChannelContainment } from './channel'
 import { computeATR } from './atr'
 import { zigzag, williamsFilter } from './zigzag'
 import { vsaTurnConfirms } from './vsa'
+import { regimeFactor } from '@/domain/indicators/adx'
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x))
 
@@ -117,26 +118,27 @@ export function evaluateImpulseConfluence(
     detail: momInW3 ? undefined : 'El mayor histograma MACD no cae en la onda 3.',
   })
 
-  // 3. Divergencia de RSI en la onda 5, CORROBORADA por volumen (OBV). La divergencia
-  // de precio/RSI es condición NECESARIA; el OBV solo puede DEBILITARLA (AND): si el
-  // volumen acumulado acompaña al nuevo extremo, no hay agotamiento real. Por construcción
-  // el factor dispara MENOS o IGUAL que antes (nunca más) → no infla la distribución del
-  // score; solo elimina divergencias-RSI puras que el volumen contradice.
+  // 3. Divergencia de RSI en la onda 5, CORROBORADA por el FLUJO de volumen. La divergencia
+  // de precio/RSI es condición NECESARIA; el flujo acumulado (delta comprador−vendedor real
+  // de Binance, o OBV de Granville como fallback) solo puede DEBILITARLA (AND): si el flujo
+  // acompaña al nuevo extremo, no hay agotamiento real. Por construcción el factor dispara
+  // MENOS o IGUAL que antes → no infla la distribución del score; solo elimina divergencias
+  // de RSI puras que el flujo real contradice.
   const r3 = ind.rsi[idx(3)]
   const r5 = ind.rsi[idx(5)]
   let priceRsiDiv = false
   if (ok(r3) && ok(r5)) {
     priceRsiDiv = up ? p[5].price > p[3].price && r5 < r3 : p[5].price < p[3].price && r5 > r3
   }
-  const obvDiverges = obvNotConfirming(ind.obv, idx(3), idx(5), dir)
+  const flowDiverges = obvNotConfirming(ind.obv, idx(3), idx(5), dir)
   factors.push({
     key: 'div5',
-    label: 'Divergencia de RSI en la onda 5 (corroborada por volumen)',
-    met: priceRsiDiv && obvDiverges,
+    label: 'Divergencia de RSI en la onda 5 (corroborada por flujo de volumen)',
+    met: priceRsiDiv && flowDiverges,
     weight: 1.5, // señal clásica de agotamiento del impulso, muy informativa
     detail:
       ok(r3) && ok(r5)
-        ? `RSI onda 3 ${r3.toFixed(0)} → onda 5 ${r5.toFixed(0)}; OBV ${obvDiverges ? 'no acompaña la extensión (corrobora)' : 'acompaña el precio (divergencia débil)'}`
+        ? `RSI onda 3 ${r3.toFixed(0)} → onda 5 ${r5.toFixed(0)}; flujo ${flowDiverges ? 'no acompaña la extensión (corrobora)' : 'acompaña el precio (divergencia débil)'}`
         : undefined,
   })
 
@@ -176,14 +178,18 @@ export function evaluateImpulseConfluence(
   // agotamiento — esfuerzo (volumen en percentil alto) con rechazo del extremo (CLV).
   // Reemplaza la antigua heurística de volumen por medias/máximos, pobre y sensible a
   // outliers. El tipo del pivote (high/low) decide la simetría; wick_spike → met=false.
+  // Si el giro no es LEGIBLE (historia corta / doji), se OMITE el factor (igual que
+  // 'subondas'), en vez de contarlo como no cumplido y penalizar de forma incomparable.
   const vsa5 = vsaTurnConfirms(candles, p[5])
-  factors.push({
-    key: 'vol',
-    label: 'Clímax/absorción VSA en el giro (fin de onda 5)',
-    met: vsa5.met,
-    weight: 1.2,
-    detail: vsa5.detail,
-  })
+  if (vsa5.readable) {
+    factors.push({
+      key: 'vol',
+      label: 'Clímax/absorción VSA en el giro (fin de onda 5)',
+      met: vsa5.met,
+      weight: 1.2,
+      detail: vsa5.detail,
+    })
+  }
 
   // 8. EMAs alineadas con la dirección del impulso (al final del conteo).
   const li = idx(5)
@@ -288,7 +294,9 @@ export function evaluateAbcConfluence(
   // corrección y la reanudación de la tendencia. Reemplaza la heurística "volumen de B <
   // volumen de A". El tipo del pivote p[3] (high/low) decide la simetría techo/suelo.
   const vsaC = vsaTurnConfirms(candles, p[3])
-  factors.push({ key: 'volB', label: 'Clímax/absorción VSA al final de C', met: vsaC.met, detail: vsaC.detail })
+  if (vsaC.readable) {
+    factors.push({ key: 'volB', label: 'Clímax/absorción VSA al final de C', met: vsaC.met, detail: vsaC.detail })
+  }
 
   // RSI no extremo en el final de C (queda margen para reanudar la tendencia).
   const rC = ind.rsi[idx(3)]
@@ -306,6 +314,24 @@ export function evaluateAbcConfluence(
   const e200 = ind.ema200[li]
   const trendIntact = ok(e50) && ok(e200) && (down ? e50 > e200 : e50 < e200)
   factors.push({ key: 'ema', label: 'Tendencia mayor (EMA50/200) intacta', met: trendIntact })
+
+  // Régimen coherente con una corrección: baja fuerza de tendencia (ADX<20) o volatilidad
+  // comprimida (ATR en percentil bajo). Eje distinto de 'ema' (que mide dirección) y del
+  // resto. Factor SUAVE w=0.3. SOLO en ABC (en triángulo el ADX es casi tautológicamente
+  // bajo y doble-contaría con 'volContrae'; en impulso sería cosmético y correlacionaría
+  // con ema/canal). Evaluado en el fin de C (ya cerrado).
+  const rg = regimeFactor(ind.adx[idx(3)], ind.atrPct[idx(3)])
+  if (rg.readable) {
+    // Durante el warmup del ADX/ATR el régimen no es legible → se OMITE (no penaliza el
+    // score de un ABC temprano de forma incomparable), igual que el factor VSA.
+    factors.push({
+      key: 'regimen',
+      label: 'Régimen coherente con corrección (baja tendencia o compresión)',
+      met: rg.met,
+      weight: 0.3,
+      detail: rg.detail,
+    })
+  }
 
   return factors
 }

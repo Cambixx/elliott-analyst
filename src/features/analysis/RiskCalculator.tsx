@@ -4,6 +4,27 @@ import { computeRiskPlan } from '@/domain/risk'
 import { useRiskStore, RISK_PCT_OPTIONS } from '@/store/useRiskStore'
 import { useJournalStore } from '@/store/useJournalStore'
 import { formatPrice } from '@/lib/format'
+import { buildPreTradeChecklist, type FlagStatus, type TradeGrade } from '@/domain/checklist'
+import { alignmentWithBias } from './useHigherTimeframe'
+import type { Bias } from '@/domain/indicators/trend'
+
+const FLAG_MARK: Record<FlagStatus, string> = { ok: '✓', warn: '•', against: '⚠', na: '•' }
+const FLAG_COLOR: Record<FlagStatus, string> = {
+  ok: 'text-green-300',
+  warn: 'text-amber-300',
+  against: 'text-red-300',
+  na: 'text-slate-500',
+}
+const GRADE_COLOR: Record<TradeGrade, string> = {
+  A: 'border-green-500/40 bg-green-500/15 text-green-300',
+  B: 'border-amber-500/40 bg-amber-500/15 text-amber-300',
+  C: 'border-red-500/40 bg-red-500/15 text-red-300',
+}
+const GRADE_HINT: Record<TradeGrade, string> = {
+  A: 'Condiciones alineadas.',
+  B: 'Condiciones mixtas: revisa qué falta.',
+  C: 'Condiciones flojas: valora esperar o reducir tamaño (no cambia tu riesgo automáticamente).',
+}
 
 const fmtUsd = (n: number) =>
   n.toLocaleString('es-ES', { maximumFractionDigits: 2 }) + ' USDC'
@@ -25,11 +46,15 @@ export function RiskCalculatorCard({
   price,
   symbol,
   timeframe,
+  higherBias,
+  derivsAlignment,
 }: {
   scenario: Scenario | null
   price: number | null | undefined
   symbol?: string
   timeframe?: string
+  higherBias?: Bias
+  derivsAlignment?: 'refuerza' | 'cautela' | 'neutral' | null
 }) {
   const { capital, riskPct, setCapital, setRiskPct } = useRiskStore()
   const addToJournal = useJournalStore((s) => s.add)
@@ -39,6 +64,21 @@ export function RiskCalculatorCard({
 
   const plan =
     scenario && price != null ? computeRiskPlan(scenario, price, capital, riskPct) : null
+
+  // Checklist de disciplina, derivado de datos YA calculados. Se muestra en vivo y se
+  // CONGELA al guardar (se pasa este snapshot a add()). VSA = .met del factor del giro.
+  const vsaFactor = scenario?.confluence.factors.find((f) => f.key === 'vol' || f.key === 'volB')
+  const checklist =
+    scenario && plan
+      ? buildPreTradeChecklist({
+          align: higherBias ? alignmentWithBias(scenario.direction, higherBias) : 'neutral',
+          confidence: scenario.confidence,
+          score: scenario.score,
+          vsaMet: vsaFactor ? vsaFactor.met : null,
+          derivs: derivsAlignment ?? null,
+          rr: plan.rr,
+        })
+      : null
 
   const handleSave = () => {
     if (!plan || !scenario || !symbol) return
@@ -54,6 +94,7 @@ export function RiskCalculatorCard({
       target: plan.targetNear,
       plannedRr: plan.rr,
       confidence: scenario.confidence,
+      checklist: checklist ?? undefined, // congelado
     })
     setSaved(true)
     clearTimeout(savedTimer.current)
@@ -68,6 +109,7 @@ export function RiskCalculatorCard({
         </span>
         {plan && (
           <span
+            title={plan.bias === 'compra' ? 'compra (posición larga)' : 'venta (posición corta)'}
             className={
               'ml-auto rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ' +
               (plan.bias === 'compra'
@@ -75,7 +117,7 @@ export function RiskCalculatorCard({
                 : 'border-red-500/30 bg-red-500/15 text-red-300')
             }
           >
-            {plan.bias === 'compra' ? 'largo' : 'corto'}
+            {plan.bias === 'compra' ? 'compra · largo' : 'venta · corto'}
           </span>
         )}
       </div>
@@ -163,6 +205,38 @@ export function RiskCalculatorCard({
             </ul>
           )}
 
+          {checklist && (
+            <div className="mt-2 rounded border border-slate-700 bg-slate-800/40 p-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Checklist de disciplina
+                </span>
+                <span className="text-[9px] text-slate-500">(se congela al guardar)</span>
+                <span
+                  className={
+                    'ml-auto rounded border px-1.5 py-0.5 text-[10px] font-bold ' +
+                    GRADE_COLOR[checklist.grade]
+                  }
+                  title="No es una probabilidad ni una validación del método"
+                >
+                  Grado {checklist.grade}
+                </span>
+              </div>
+              <ul className="mt-1 space-y-0.5">
+                {checklist.flags.map((f) => (
+                  <li key={f.key} className="flex items-baseline gap-1.5 text-[10px] text-slate-400">
+                    <span className={FLAG_COLOR[f.status]}>{FLAG_MARK[f.status]}</span>
+                    <span>{f.detail}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-[10px] text-slate-500">
+                {GRADE_HINT[checklist.grade]} Foto de tus condiciones de entrada para combatir el sesgo
+                retrospectivo; no es una probabilidad ni una validación del método.
+              </p>
+            </div>
+          )}
+
           {symbol && (
             <button
               type="button"
@@ -174,7 +248,7 @@ export function RiskCalculatorCard({
             </button>
           )}
 
-          <p className="mt-2 text-[10px] leading-relaxed text-slate-600">
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
             Cálculo orientativo derivado del conteo primario. No es asesoramiento: el stop puede
             saltar con slippage y el objetivo puede no alcanzarse.
           </p>

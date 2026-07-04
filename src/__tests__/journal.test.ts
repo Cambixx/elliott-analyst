@@ -89,3 +89,54 @@ describe('journalStats', () => {
     expect(s.realizedRSum).toBeNull()
   })
 })
+
+import { gradeStats, MIN_GRADE_SAMPLE } from '@/domain/journal'
+import type { PreTradeChecklist } from '@/domain/checklist'
+
+const cl = (grade: 'A' | 'B' | 'C'): PreTradeChecklist => ({ grade, flags: [] })
+
+describe('gradeStats', () => {
+  it('segmenta por grado del checklist congelado e ignora anotaciones sin checklist', () => {
+    const entries = [
+      mk({ checklist: cl('A'), status: 'ganada', realizedR: 2 }),
+      mk({ checklist: cl('A'), status: 'perdida', realizedR: -1 }),
+      mk({ checklist: cl('B'), status: 'ganada', realizedR: 1 }),
+      mk({ status: 'ganada', realizedR: 5 }), // sin checklist → no cuenta en ningún grado
+    ]
+    const stats = gradeStats(entries)
+    const a = stats.find((g) => g.grade === 'A')!
+    const b = stats.find((g) => g.grade === 'B')!
+    expect(a.n).toBe(2)
+    expect(a.decided).toBe(2)
+    expect(a.wins).toBe(1)
+    expect(b.n).toBe(1)
+    // Sin ≥30 decididas por grado, no se enseña tasa.
+    expect(a.winRate).toBeNull()
+    expect(a.expectancyR).toBeNull()
+  })
+
+  it('con ≥ MIN_GRADE_SAMPLE decididas muestra winRate y expectancy; el gate es estricto', () => {
+    // 29 decididas en A → aún insuficiente; 30 → suficiente.
+    const win29 = Array.from({ length: 29 }, () => mk({ checklist: cl('A'), status: 'ganada', realizedR: 1 }))
+    expect(gradeStats(win29).find((g) => g.grade === 'A')!.winRate).toBeNull()
+
+    const win30 = Array.from({ length: MIN_GRADE_SAMPLE }, (_, i) =>
+      mk({ checklist: cl('A'), status: i < 18 ? 'ganada' : 'perdida', realizedR: i < 18 ? 2 : -1 }),
+    )
+    const a = gradeStats(win30).find((g) => g.grade === 'A')!
+    expect(a.decided).toBe(MIN_GRADE_SAMPLE)
+    expect(a.winRate).toBeCloseTo(18 / 30)
+    expect(a.expectancyR).not.toBeNull()
+  })
+
+  it('expectancyR se gatea por su PROPIA muestra de R, no por decididas', () => {
+    // 30 decididas de grado A pero solo 5 con realizedR (el resto cerró sin precio de salida):
+    // winRate SÍ (30 decididas), expectancyR NO (5 < 30).
+    const entries = Array.from({ length: MIN_GRADE_SAMPLE }, (_, i) =>
+      mk({ checklist: cl('A'), status: 'ganada', realizedR: i < 5 ? 2 : null }),
+    )
+    const a = gradeStats(entries).find((g) => g.grade === 'A')!
+    expect(a.winRate).not.toBeNull()
+    expect(a.expectancyR).toBeNull()
+  })
+})
