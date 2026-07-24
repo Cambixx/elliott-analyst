@@ -22,6 +22,8 @@ import { computeFibZone } from '@/domain/elliott/fibZone'
 import { anchoredVwap } from '@/domain/vwap'
 import { computeForecast } from '@/domain/elliott/forecast'
 import { supportResistance, classifyLevel } from '@/domain/elliott/levels'
+import { fractalPivots, pivotLevels, trendConsistentPivots } from '@/domain/indicators/pivots'
+import { ema } from '@/domain/indicators/ema'
 import { computeATR } from '@/domain/elliott/atr'
 import { computeRegime } from '@/domain/indicators/adx'
 import { computeTargetClusters } from '@/domain/elliott/targetClusters'
@@ -64,11 +66,13 @@ export default function App() {
     showForecast,
     showAlternatives,
     showLevels,
+    showPivots,
     toggleRsi,
     toggleMacd,
     toggleForecast,
     toggleAlternatives,
     toggleLevels,
+    togglePivots,
   } = useMarketStore()
   const { data: candles, isLoading, isError, error } = useKlines(symbol, interval)
   const liveCandle = useLiveCandle(symbol, interval)
@@ -181,6 +185,44 @@ export default function App() {
     })
   }, [srLevelsRaw, lastPrice])
 
+  // Pivotes fractales (swings) al estilo CRECETRADER: triángulos en cada máximo/mínimo local
+  // confirmado + los niveles cercanos proyectados como rayos de S/R. Le pasamos closedCandles
+  // (además, fractalPivots se autoprotege excluyendo una vela final en formación): el marcado
+  // es anti-repaint y no salta con cada vela nueva.
+  const pivotAll = useMemo(() => fractalPivots(closedCandles), [closedCandles])
+  // Marcadores estilo CRECETRADER: solo los pivotes que EXTIENDEN la estructura de la
+  // tendencia (alcista → máx/mín crecientes; bajista → decrecientes). La tendencia es la
+  // PENDIENTE de la EMA50 (ágil: en un retroceso cambia a bajista y muestra su estructura
+  // decreciente). Los niveles (rayos) siguen saliendo de TODOS los pivotes: son S/R, no
+  // estructura, y CRECETRADER también dibuja más niveles que triángulos.
+  const pivotMarkers = useMemo(() => {
+    if (closedCandles.length === 0) return []
+    const ema50 = ema(
+      closedCandles.map((c) => c.close),
+      50,
+    )
+    const SLOPE = 3 // pendiente sobre 3 velas: suaviza el whipsaw sin perder reactividad
+    const trendUp = closedCandles.map((_, i) => {
+      const a = ema50[i]
+      const b = ema50[i - SLOPE]
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return true // warmup: no filtrar
+      return a >= b
+    })
+    return trendConsistentPivots(pivotAll, trendUp)
+  }, [pivotAll, closedCandles])
+  const pivotLevelsDraw = useMemo(
+    () =>
+      pivotLevels(pivotAll, { price: lastPrice ?? undefined }).map((l) => ({
+        price: l.price,
+        type: l.type,
+        timestamp: l.timestamp,
+        // Etiqueta entera para precios grandes (como CRECETRADER: "64.454"); los decimales
+        // solo importan en monedas baratas, donde cae al formato adaptativo.
+        label: l.price >= 1000 ? Math.round(l.price).toLocaleString('es-ES') : formatPrice(l.price),
+      })),
+    [pivotAll, lastPrice],
+  )
+
   return (
     <div className="flex min-h-dvh flex-col lg:h-screen">
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-slate-800 px-3 py-2 sm:gap-x-4 sm:px-4 sm:py-2.5">
@@ -223,6 +265,7 @@ export default function App() {
             onClick={toggleAlternatives}
           />
           <IndicatorToggle label="Niveles" active={showLevels} onClick={toggleLevels} />
+          <IndicatorToggle label="Pivotes" active={showPivots} onClick={togglePivots} />
           <IndicatorToggle label="Proyección" active={showForecast} onClick={toggleForecast} />
         </div>
 
@@ -283,6 +326,7 @@ export default function App() {
             alternativesOn={showAlternatives && !focused}
             fib={fibZone != null}
             levelsOn={showLevels}
+            pivotsOn={showPivots}
             forecastOn={forecast != null}
           />
           <div className="relative min-h-0 flex-1">
@@ -313,6 +357,8 @@ export default function App() {
               vwap={showLevels ? vwap : null}
               srLevels={showLevels ? srLevels : []}
               targetClusters={showLevels ? targetClusters : []}
+              pivots={showPivots ? pivotMarkers : []}
+              pivotLevels={showPivots ? pivotLevelsDraw : []}
               forecast={forecast}
               showRsi={showRsi}
               showMacd={showMacd}

@@ -21,6 +21,9 @@ import './vwapOverlay' // registra el overlay 'vwapLine'
 import './srOverlay' // registra el overlay 'srLevels'
 import './forecastOverlay' // registra el overlay 'waveForecast'
 import './targetClusterOverlay' // registra el overlay 'targetClusters'
+import './pivotOverlay' // registra los overlays 'pivotMarkers' y 'pivotLevels'
+import type { PivotLevelDraw, PivotMarkersExtend, PivotLevelsExtend } from './pivotOverlay'
+import type { FractalPivot } from '@/domain/indicators/pivots'
 import { formatPrice as fmtPrice } from '@/lib/format'
 import { projectionTargets } from '@/domain/elliott/projection'
 import { channelDrawPoints } from '@/domain/elliott/channel'
@@ -58,6 +61,10 @@ interface CandleChartProps {
   srLevels?: SrDrawItem[]
   /** Zonas de convergencia de objetivos (varios conteos apuntan a la misma zona). */
   targetClusters?: TargetCluster[]
+  /** Pivotes fractales (swings) a marcar con triángulos. Vacío = capa apagada. */
+  pivots?: FractalPivot[]
+  /** Niveles de pivote a proyectar como rayos horizontales de S/R. */
+  pivotLevels?: PivotLevelDraw[]
   /** Proyección hipotética de las ondas que faltan (null si el toggle está apagado o no aplica). */
   forecast?: WaveForecast | null
   showRsi: boolean
@@ -93,6 +100,8 @@ export function CandleChart({
   vwap,
   targetClusters,
   srLevels,
+  pivots: pivotMarkers,
+  pivotLevels: pivotLevelsDraw,
   forecast,
   showRsi,
   showMacd,
@@ -208,6 +217,14 @@ export function CandleChart({
       : '') +
     (targetClusters && targetClusters.length
       ? `#tc:${targetClusters.map((c) => `${c.zone.low.toPrecision(6)}-${c.zone.high.toPrecision(6)}x${c.count}`).join(',')}`
+      : '') +
+    // Pivotes: son ANTI-REPAINT (solo se AÑADEN; los pasados nunca cambian), así que basta
+    // firmar por nº + el último para redibujar cuando aparece un pivote nuevo o se togglea.
+    (pivotMarkers && pivotMarkers.length
+      ? `#pv:${pivotMarkers.length}:${pivotMarkers[pivotMarkers.length - 1].timestamp}:${pivotMarkers[pivotMarkers.length - 1].price.toPrecision(6)}`
+      : '') +
+    (pivotLevelsDraw && pivotLevelsDraw.length
+      ? `#pl:${pivotLevelsDraw.map((l) => l.price.toPrecision(6)).join(',')}`
       : '')
   useEffect(() => {
     const chart = chartRef.current
@@ -246,6 +263,25 @@ export function CandleChart({
         extendData: {
           items: targetClusters.map((c) => ({ label: c.zone.label, count: c.count })),
         } satisfies TargetClusterExtend,
+      })
+    }
+
+    // Pivotes fractales (independientes del conteo de Elliott, como en el gráfico de
+    // referencia): triángulos en cada swing + rayos de nivel proyectados desde su origen.
+    if (pivotMarkers && pivotMarkers.length > 0) {
+      chart.createOverlay({
+        name: 'pivotMarkers',
+        lock: true,
+        points: pivotMarkers.map((p) => ({ timestamp: p.timestamp, value: p.price })),
+        extendData: { types: pivotMarkers.map((p) => p.type) } satisfies PivotMarkersExtend,
+      })
+    }
+    if (pivotLevelsDraw && pivotLevelsDraw.length > 0) {
+      chart.createOverlay({
+        name: 'pivotLevels',
+        lock: true,
+        points: pivotLevelsDraw.map((l) => ({ timestamp: l.timestamp, value: l.price })),
+        extendData: { items: pivotLevelsDraw } satisfies PivotLevelsExtend,
       })
     }
 

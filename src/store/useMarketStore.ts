@@ -17,6 +17,9 @@ interface MarketState {
   /** Capas de niveles secundarios en el gráfico (VWAP + soportes/resistencias +
    *  convergencia de objetivos). Apagado por defecto para no saturar. */
   showLevels: boolean
+  /** Pivotes fractales (triángulos de máximos/mínimos) + niveles de pivote proyectados
+   *  como S/R. Apagado por defecto: el gráfico arranca limpio. */
+  showPivots: boolean
   /** Pares marcados como favoritos (acceso rápido en la barra de favoritos). */
   favorites: string[]
   setSymbol: (symbol: string) => void
@@ -27,6 +30,7 @@ interface MarketState {
   toggleForecast: () => void
   toggleAlternatives: () => void
   toggleLevels: () => void
+  togglePivots: () => void
   toggleFavorite: (symbol: string) => void
 }
 
@@ -48,6 +52,7 @@ export const useMarketStore = create<MarketState>()(
       showForecast: false,
       showAlternatives: false,
       showLevels: false,
+      showPivots: false,
       favorites: ['BTCUSDC', 'ETHUSDC', 'SOLUSDC', 'BNBUSDC'],
       setSymbol: (symbol) => set({ symbol }),
       setInterval: (interval) => set({ interval }),
@@ -57,6 +62,7 @@ export const useMarketStore = create<MarketState>()(
       toggleForecast: () => set((s) => ({ showForecast: !s.showForecast })),
       toggleAlternatives: () => set((s) => ({ showAlternatives: !s.showAlternatives })),
       toggleLevels: () => set((s) => ({ showLevels: !s.showLevels })),
+      togglePivots: () => set((s) => ({ showPivots: !s.showPivots })),
       toggleFavorite: (symbol) =>
         set((s) => ({
           favorites: s.favorites.includes(symbol)
@@ -75,6 +81,7 @@ export const useMarketStore = create<MarketState>()(
         showForecast: s.showForecast,
         showAlternatives: s.showAlternatives,
         showLevels: s.showLevels,
+        showPivots: s.showPivots,
         favorites: s.favorites,
       }),
     },

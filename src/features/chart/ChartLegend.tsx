@@ -18,15 +18,35 @@ const PATTERN_LABEL: Record<Scenario['pattern'], string> = {
   wxy: 'Doble W-X-Y',
 }
 
-function Item({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
+function Item({
+  color,
+  label,
+  dashed,
+  triangle,
+}: {
+  color: string
+  label: string
+  dashed?: boolean
+  /** Si se indica, dibuja un triángulo (marcador de pivote) en vez de una línea. */
+  triangle?: 'up' | 'down'
+}) {
   return (
     <span className="flex items-center gap-1 whitespace-nowrap text-[10px] text-slate-400">
-      <span
-        className="inline-block h-0 w-3.5 shrink-0"
-        style={{
-          borderTop: `2px ${dashed ? 'dashed' : 'solid'} ${color}`,
-        }}
-      />
+      {triangle ? (
+        <span
+          className="inline-block h-0 w-0 shrink-0"
+          style={
+            triangle === 'up'
+              ? { borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderBottom: `6px solid ${color}` }
+              : { borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: `6px solid ${color}` }
+          }
+        />
+      ) : (
+        <span
+          className="inline-block h-0 w-3.5 shrink-0"
+          style={{ borderTop: `2px ${dashed ? 'dashed' : 'solid'} ${color}` }}
+        />
+      )}
       {label}
     </span>
   )
@@ -42,12 +62,14 @@ export function ChartLegend({
   alternativesOn,
   fib,
   levelsOn,
+  pivotsOn,
   forecastOn,
 }: {
   primary: Scenario | null | undefined
   alternativesOn: boolean
   fib: boolean
   levelsOn: boolean
+  pivotsOn: boolean
   forecastOn: boolean
 }) {
   return (
@@ -67,6 +89,13 @@ export function ChartLegend({
           <Item color="#ef4444" label="Resistencia" />
           <Item color="#c084fc" label="VWAP" dashed />
           <Item color="#818cf8" label="Convergencia" />
+        </>
+      )}
+      {pivotsOn && (
+        <>
+          <Item color="#ef4444" label="Pivote máx." triangle="down" />
+          <Item color="#22c55e" label="Pivote mín." triangle="up" />
+          <Item color="#94a3b8" label="Niveles de pivote" />
         </>
       )}
       {forecastOn && <Item color="#f472b6" label="Proyección" dashed />}
