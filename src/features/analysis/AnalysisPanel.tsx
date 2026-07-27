@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Confidence, Scenario, ScenarioPattern } from '@/domain/elliott/types'
 import type { Bias } from '@/domain/indicators/trend'
 import type { FibZone } from '@/domain/elliott/fibZone'
@@ -15,6 +15,12 @@ import {
   type Calibration,
 } from '@/domain/elliott/calibration'
 import { weightedMetPct } from '@/domain/elliott/confluence'
+import { buildAnalysisReport } from '@/domain/report'
+import { computeRiskPlan } from '@/domain/risk'
+import { useRiskStore } from '@/store/useRiskStore'
+import { useFearGreed } from '@/features/market-context/useMarketContext'
+import { buildChecklistFor } from './preTrade'
+import { ReportDialog } from './ReportDialog'
 
 /** Etiquetas cortas de los factores de confluencia (para el panel de transparencia). */
 const FACTOR_LABEL: Record<string, string> = {
@@ -648,22 +654,83 @@ export function AnalysisPanel({
   // Lectura de derivados frente al escenario, para el checklist del diario (react-query
   // deduplica esta query con la de DerivativesCard por su queryKey).
   const derivsQuery = useDerivatives(base)
-  const derivsAlignment =
+  const derivsRead =
     derivsQuery.data && biasScenario
       ? derivativesRead(
           classifyFunding(derivsQuery.data.fundingRate),
           oiTrend(derivsQuery.data.oiHistory).trend,
           scenarioBias(biasScenario),
-        ).alignment
+        )
       : null
+  const derivsAlignment = derivsRead?.alignment ?? null
+
+  // --- Informe de situación (bajo demanda) ---------------------------------------------
+  // Se construye AL PULSAR, no en cada render: es una foto del momento, y así el coste solo
+  // se paga cuando el usuario lo pide.
+  const [report, setReport] = useState<ReturnType<typeof buildAnalysisReport> | null>(null)
+  const { capital, riskPct } = useRiskStore()
+  const { data: fearGreed } = useFearGreed()
+  const handleReport = () => {
+    const plan =
+      biasScenario && lastPrice != null
+        ? computeRiskPlan(biasScenario, lastPrice, capital, riskPct)
+        : null
+    setReport(
+      buildAnalysisReport({
+        symbol: symbol ?? base,
+        timeframe: timeframe ?? '',
+        lastPrice,
+        now: new Date(),
+        scenarios,
+        focusedId,
+        higher: { timeframe: higher.timeframe, bias: higher.bias, scenario: higher.scenario },
+        regime,
+        fibZone,
+        vwap,
+        levels: structureLevels,
+        clusters,
+        sentiment: fearGreed && Number.isFinite(fearGreed.value) ? { value: fearGreed.value, label: fearGreed.label } : null,
+        derivatives: derivsRead,
+        calibration: backtest?.calibration,
+        developingCalibration: backtest?.developingCalibration,
+        risk: plan,
+        checklist: buildChecklistFor(biasScenario, plan, higher.bias, derivsAlignment),
+        dataFreshness:
+          dataStatus === 'ready'
+            ? 'velas cerradas al día'
+            : dataStatus === 'loading'
+              ? 'cargando (pueden faltar velas recientes)'
+              : 'error al actualizar: se muestran los últimos datos disponibles',
+      }),
+    )
+  }
+
   return (
     <aside className="flex w-full shrink-0 flex-col gap-3 overflow-visible border-t border-slate-800 bg-slate-900/40 p-4 lg:w-96 lg:overflow-y-auto lg:border-l lg:border-t-0">
       <div>
-        <h2 className="text-sm font-bold tracking-wide text-slate-200">Análisis de Elliott</h2>
+        <div className="flex items-start gap-2">
+          <h2 className="text-sm font-bold tracking-wide text-slate-200">Análisis de Elliott</h2>
+          <button
+            onClick={handleReport}
+            aria-label="Analizar situación"
+            className="ml-auto shrink-0 rounded border border-cyan-700/60 bg-cyan-950/40 px-2.5 py-1 text-xs font-semibold text-cyan-200 transition-colors hover:bg-cyan-900/50"
+            title="Reúne en un informe todo lo que la herramienta ha calculado ahora mismo"
+          >
+            Analizar situación
+          </button>
+        </div>
         <p className="mt-0.5 text-xs text-slate-500">
           Escenarios probabilísticos sobre velas cerradas. No son señales de compra/venta.
         </p>
       </div>
+
+      {report && (
+        <ReportDialog
+          sections={report}
+          title={`Informe de situación · ${symbol ?? base}${timeframe ? ` · ${timeframe}` : ''}`}
+          onClose={() => setReport(null)}
+        />
+      )}
 
       {alertsSlot}
       <HigherContextCard ctx={higher} />

@@ -4,8 +4,8 @@ import { computeRiskPlan } from '@/domain/risk'
 import { useRiskStore, RISK_PCT_OPTIONS } from '@/store/useRiskStore'
 import { useJournalStore } from '@/store/useJournalStore'
 import { formatPrice } from '@/lib/format'
-import { buildPreTradeChecklist, type FlagStatus, type TradeGrade } from '@/domain/checklist'
-import { alignmentWithBias } from './useHigherTimeframe'
+import { type FlagStatus, type TradeGrade } from '@/domain/checklist'
+import { buildChecklistFor } from './preTrade'
 import type { Bias } from '@/domain/indicators/trend'
 
 const FLAG_MARK: Record<FlagStatus, string> = { ok: '✓', warn: '•', against: '⚠', na: '•' }
@@ -66,19 +66,8 @@ export function RiskCalculatorCard({
     scenario && price != null ? computeRiskPlan(scenario, price, capital, riskPct) : null
 
   // Checklist de disciplina, derivado de datos YA calculados. Se muestra en vivo y se
-  // CONGELA al guardar (se pasa este snapshot a add()). VSA = .met del factor del giro.
-  const vsaFactor = scenario?.confluence.factors.find((f) => f.key === 'vol' || f.key === 'volB')
-  const checklist =
-    scenario && plan
-      ? buildPreTradeChecklist({
-          align: higherBias ? alignmentWithBias(scenario.direction, higherBias) : 'neutral',
-          confidence: scenario.confidence,
-          score: scenario.score,
-          vsaMet: vsaFactor ? vsaFactor.met : null,
-          derivs: derivsAlignment ?? null,
-          rr: plan.rr,
-        })
-      : null
+  // CONGELA al guardar (se pasa este snapshot a add()). Fuente única con el informe.
+  const checklist = buildChecklistFor(scenario, plan, higherBias, derivsAlignment)
 
   const handleSave = () => {
     if (!plan || !scenario || !symbol) return
