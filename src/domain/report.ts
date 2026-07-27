@@ -6,6 +6,7 @@ import type { AnchoredVwap } from './vwap'
 import type { RegimeContext } from './indicators/adx'
 import type { PreTradeChecklist } from './checklist'
 import type { RiskPlan } from './risk'
+import type { ConfirmationTrigger } from './elliott/trigger'
 import { scenarioBias } from './elliott/opportunity'
 import { scoreToLikelihood, type Calibration } from './elliott/calibration'
 import { waveRelations } from './elliott/relations'
@@ -42,6 +43,8 @@ export interface ReportInput {
   calibration?: Calibration | null
   developingCalibration?: Calibration | null
   risk?: RiskPlan | null
+  /** Nivel cuya ruptura confirmaría la tesis (y qué conteo contrario mataría). */
+  trigger?: ConfirmationTrigger | null
   checklist?: PreTradeChecklist | null
   /** Frescura de los datos, tal y como la muestra el badge de cabecera. */
   dataFreshness?: string | null
@@ -270,17 +273,34 @@ export function buildAnalysisReport(i: ReportInput): ReportSection[] {
   const risk: string[] = []
   if (i.risk) {
     risk.push(
-      `Plan sobre el conteo principal (${i.risk.bias}): entrada ${p(i.risk.entry)} · stop ${p(i.risk.stop)} (${i.risk.stopLabel}) · objetivo ${p(i.risk.targetNear)}.`,
+      `Plan sobre el conteo principal (${i.risk.bias}): entrada ${p(i.risk.entry)} · stop ${p(i.risk.stop)} (${i.risk.stopLabel}) · objetivo ${p(i.risk.targetNear)}${i.risk.targetLabel ? ` (${i.risk.targetLabel})` : ''}.`,
     )
     risk.push(
       // stopDistPct viene como FRACCIÓN (stopDist/price), igual que en la calculadora: ×100.
       `Distancia al stop ${(i.risk.stopDistPct * 100).toFixed(2)}% · R:R ${i.risk.rr != null ? `1:${i.risk.rr.toFixed(2)}` : 'indefinido'} · posición ${p(i.risk.positionNotional)} USDC (${i.risk.positionUnits.toPrecision(4)} unidades) para arriesgar ${p(i.risk.riskAmount)} USDC.`,
     )
+    if (i.risk.stopBuffer > 0) {
+      risk.push(
+        `El stop lleva un colchón de ${i.risk.stopBufferAtr}× ATR: el nivel estructural está en ${p(i.risk.stopLevel)} y la salida real en ${p(i.risk.stop)}, para que una mecha sobre el nivel no cierre la posición (a cambio de un R:R algo peor).`,
+      )
+    }
     for (const w of i.risk.warnings) risk.push(`Aviso: ${w}`)
   } else {
     risk.push(
       'Este escenario no tiene un sesgo direccional accionable ahora (o el precio ya superó la invalidación): la calculadora no propone plan.',
     )
+  }
+  if (i.trigger) {
+    risk.push(
+      `Disparador de confirmación: ${p(i.trigger.price)} (${i.trigger.kind} ${i.trigger.strength}, ${i.trigger.touches} toques, a ${i.trigger.distancePct.toFixed(1)}% del precio).`,
+    )
+    risk.push(
+      `El plan de arriba ANTICIPA el giro. Romper ese nivel sería la primera prueba a favor: se entra peor y queda menos recorrido al objetivo, pero la tesis deja de ser anticipada.` +
+        (i.trigger.invalidates.length > 0
+          ? ` Además invalidaría el conteo contrario (${i.trigger.invalidates.join(', ')}): el mismo movimiento confirma esta lectura y descarta la opuesta.`
+          : ''),
+    )
+    risk.push('Romper un nivel no garantiza nada: reduce la contradicción, no la incertidumbre.')
   }
   if (i.checklist) {
     risk.push(`Checklist pre-entrada — grado ${i.checklist.grade}:`)
@@ -307,6 +327,9 @@ export function buildAnalysisReport(i: ReportInput): ReportSection[] {
   if (rel.length > 0) {
     rel.push(
       'Backtest walk-forward sin look-ahead, muestra pequeña por par. Mide si el conteo llegó a su objetivo antes que a su invalidación — NO el resultado del plan de riesgo de arriba, cuyo stop y objetivo pueden ser otros niveles. Mide la utilidad del conteo, no la rentabilidad. El pasado no garantiza el futuro.',
+    )
+    rel.push(
+      'Se calcula sobre una VENTANA RODANTE de las últimas 1.000 velas: al entrar velas nuevas salen las más antiguas, así que estos contadores pueden subir o BAJAR entre dos informes. No es un error: es que el tramo evaluado se ha desplazado.',
     )
     sections.push({ title: 'Fiabilidad histórica del motor', lines: rel })
   }

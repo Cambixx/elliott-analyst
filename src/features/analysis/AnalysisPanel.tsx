@@ -17,6 +17,7 @@ import {
 import { weightedMetPct } from '@/domain/elliott/confluence'
 import { buildAnalysisReport } from '@/domain/report'
 import { computeRiskPlan } from '@/domain/risk'
+import { confirmationTrigger } from '@/domain/elliott/trigger'
 import { useRiskStore } from '@/store/useRiskStore'
 import { useFearGreed } from '@/features/market-context/useMarketContext'
 import { buildChecklistFor } from './preTrade'
@@ -627,6 +628,7 @@ export function AnalysisPanel({
   dataStatus = 'ready',
   regime,
   clusters,
+  atr,
 }: {
   scenarios: Scenario[]
   higher: HigherContext
@@ -648,6 +650,8 @@ export function AnalysisPanel({
   alertsSlot?: ReactNode
   /** Estado de la carga de velas: distingue "cargando/error" de "sin estructura clara". */
   dataStatus?: 'loading' | 'error' | 'ready'
+  /** ATR actual (colchón del stop en la calculadora). */
+  atr?: number | null
 }) {
   // El posicionamiento de derivados se contrasta con el escenario que el usuario está
   // mirando: el aislado si hay uno, o el primario por defecto (antes siempre el primario,
@@ -670,12 +674,15 @@ export function AnalysisPanel({
   // Se construye AL PULSAR, no en cada render: es una foto del momento, y así el coste solo
   // se paga cuando el usuario lo pide.
   const [report, setReport] = useState<ReturnType<typeof buildAnalysisReport> | null>(null)
-  const { capital, riskPct } = useRiskStore()
+  const { capital, riskPct, stopBufferAtr } = useRiskStore()
   const { data: fearGreed } = useFearGreed()
   const handleReport = () => {
     const plan =
       biasScenario && lastPrice != null
-        ? computeRiskPlan(biasScenario, lastPrice, capital, riskPct)
+        ? computeRiskPlan(biasScenario, lastPrice, capital, riskPct, {
+            atr,
+            bufferAtr: stopBufferAtr,
+          })
         : null
     setReport(
       buildAnalysisReport({
@@ -696,6 +703,9 @@ export function AnalysisPanel({
         calibration: backtest?.calibration,
         developingCalibration: backtest?.developingCalibration,
         risk: plan,
+        trigger: biasScenario
+          ? confirmationTrigger(biasScenario, lastPrice, structureLevels ?? [], scenarios)
+          : null,
         checklist: buildChecklistFor(biasScenario, plan, higher.bias, derivsAlignment),
         dataFreshness:
           dataStatus === 'ready'
@@ -792,6 +802,9 @@ export function AnalysisPanel({
           timeframe={timeframe}
           higherBias={higher.bias}
           derivsAlignment={derivsAlignment}
+          atr={atr}
+          levels={structureLevels}
+          alternatives={scenarios}
         />
       )}
 

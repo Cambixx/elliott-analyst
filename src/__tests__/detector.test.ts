@@ -157,6 +157,28 @@ describe('corrección ABC completada (reanudación)', () => {
   })
 })
 
+/**
+ * Regresión: el verbo de la invalidación debe seguir al SENTIDO de la estructura. En una
+ * diagonal BAJISTA la onda 5 es un mínimo, así que lo que niega su fin es PERDERLO; el
+ * texto decía siempre "Superar", señalando el lado contrario al real.
+ */
+describe('diagonal completada: verbo de invalidación según el sentido', () => {
+  it('una diagonal bajista invalida por PERDER el extremo de la onda 5', () => {
+    // Cuña bajista contractiva (w1=15, w3=13, w5=10) con la onda 4 (88) solapando la
+    // onda 1 (85), y rebote final a 84 que CONFIRMA el pivote de la onda 5.
+    const candles = candlesFromPath([100, 85, 93, 80, 88, 78, 84], 6)
+    const diag = detectScenarios(candles, 1.3).scenarios.find(
+      (s) => s.pattern === 'diagonal' && s.direction === 'down' && !s.developing,
+    )
+    // Sin escapatoria: si el sintético dejara de producir la diagonal, el test FALLA
+    // (avisando de que ya no cubre nada) en vez de pasar en vacío.
+    expect(diag).toBeDefined()
+    expect(diag!.invalidation.price).toBeCloseTo(78, 0)
+    expect(diag!.invalidation.reason).toContain('Perder')
+    expect(diag!.invalidation.reason).not.toContain('Superar')
+  })
+})
+
 describe('plana expandida', () => {
   it('la invalidación se sitúa en el extremo de B, no en el origen ya superado', () => {
     // A: 100→80 (20 abajo) · B: 80→103 (bRet = 1.15, expandida) · C: 103→85.

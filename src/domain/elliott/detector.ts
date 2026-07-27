@@ -532,10 +532,16 @@ function buildDiagonal(
     // En desplomes de pares baratos la zona bajista puede salir ≤0: se omite el target.
     target = hi <= 0 ? undefined : { label: 'Zona objetivo onda 5 (diagonal)', low: Math.max(Math.min(a, b), 0), high: hi }
   } else {
-    // Diagonal completada → reversión rápida hacia el inicio de la cuña.
+    // Diagonal completada → reversión rápida hacia el inicio de la cuña. El nivel es el
+    // extremo de la onda 5 (ir MÁS ALLÁ = la cuña se extiende, no ha terminado), pero el
+    // verbo depende del sentido: en una diagonal bajista la onda 5 es un MÍNIMO, así que
+    // lo que niega su fin es PERDERLO, no superarlo (antes decía siempre "Superar", lo que
+    // en bajistas señalaba el lado contrario al real).
     invalidation = {
       price: p[5].price,
-      reason: `Superar el extremo de la onda 5 (${fmt(p[5].price)}) cuestiona el fin de la diagonal.`,
+      reason:
+        `${up ? 'Superar' : 'Perder'} el extremo de la onda 5 (${fmt(p[5].price)}) indicaría que la ` +
+        `diagonal ${dirWord} sigue extendiéndose y no ha terminado.`,
     }
     const a = p[5].price - sign * 0.618 * range
     const b = p[5].price - sign * range

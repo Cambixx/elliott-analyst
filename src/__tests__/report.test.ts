@@ -152,8 +152,12 @@ describe('buildAnalysisReport', () => {
           entry: 65_494.92,
           stop: 63_668.52,
           stopLabel: 'extremo de la corrección',
+          stopLevel: 63_668.52,
+          stopBuffer: 0,
+          stopBufferAtr: 0,
           targetNear: 67_000,
           targetFar: null,
+          targetLabel: 'origen de la corrección (imán al reanudarse la tendencia)',
           riskAmount: 10,
           stopDistPct: 0.0279,
           positionNotional: 358.6,
@@ -166,6 +170,16 @@ describe('buildAnalysisReport', () => {
     )
     expect(text).toContain('Distancia al stop 2.79%')
     expect(text).not.toContain('0.03%')
+    // El objetivo debe declarar DE DÓNDE sale: sin eso parecía un número prestado de otro
+    // conteo (el zigzag completado dice "sin zona objetivo pendiente" y aun así hay target).
+    expect(text).toContain('origen de la corrección')
+  })
+
+  it('advierte de que los contadores del backtest van sobre ventana rodante', () => {
+    const cal = { total: 10, hits: 7, hitRate: 0.7, buckets: [], factorStats: [] }
+    const text = flat(baseInput({ calibration: cal }))
+    expect(text).toContain('VENTANA RODANTE')
+    expect(text).toContain('pueden subir o BAJAR')
   })
 })
 

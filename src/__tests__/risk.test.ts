@@ -181,3 +181,65 @@ describe('computeRiskPlan', () => {
     expect(plan!.warnings.some((w) => w.includes('muy cercano'))).toBe(true)
   })
 })
+
+describe('colchón de ATR en el stop', () => {
+  it('sin colchón el stop queda pegado al nivel (comportamiento por defecto intacto)', () => {
+    const s = bearishImpulseDone() // completado bajista → se opera al alza; stop en 90
+    const plan = computeRiskPlan(s, 100, 1000, 1)
+    expect(plan!.stop).toBe(90)
+    expect(plan!.stopLevel).toBe(90)
+    expect(plan!.stopBuffer).toBe(0)
+    expect(plan!.stopBufferAtr).toBe(0)
+  })
+
+  it('en LARGO aleja el stop hacia ABAJO y conserva el nivel estructural', () => {
+    const s = bearishImpulseDone()
+    const plan = computeRiskPlan(s, 100, 1000, 1, { atr: 5, bufferAtr: 1 })
+    expect(plan!.stopLevel).toBe(90) // el nivel de la tesis no se mueve
+    expect(plan!.stop).toBe(85) // 90 − 1×5
+    expect(plan!.stopBuffer).toBe(5)
+    expect(plan!.stopDistPct).toBeCloseTo(0.15, 5) // 15/100
+  })
+
+  it('en CORTO aleja el stop hacia ARRIBA', () => {
+    // Impulso ALCISTA completado → giro a la baja (venta); stop = invalidación por encima.
+    const s = mkScenario({
+      kind: 'impulse',
+      pattern: 'impulso',
+      direction: 'up',
+      invalidation: { price: 110, reason: '' },
+      target: { label: 'Zona', low: 80, high: 90 },
+      pivots: [
+        mkPivot(0, 60, 'low'),
+        mkPivot(10, 80, 'high'),
+        mkPivot(20, 70, 'low'),
+        mkPivot(30, 100, 'high'),
+        mkPivot(40, 90, 'low'),
+        mkPivot(50, 110, 'high'),
+      ],
+    })
+    const plan = computeRiskPlan(s, 100, 1000, 1, { atr: 4, bufferAtr: 0.5 })
+    expect(plan!.bias).toBe('venta')
+    expect(plan!.stopLevel).toBe(110)
+    expect(plan!.stop).toBe(112) // 110 + 0.5×4
+  })
+
+  it('el colchón EMPEORA el R:R y REDUCE el tamaño de la posición (es un tradeoff explícito)', () => {
+    const s = bearishImpulseDone()
+    const sin = computeRiskPlan(s, 100, 1000, 1)
+    const con = computeRiskPlan(s, 100, 1000, 1, { atr: 5, bufferAtr: 1 })
+    expect(con!.rr!).toBeLessThan(sin!.rr!)
+    expect(con!.positionNotional).toBeLessThan(sin!.positionNotional)
+    // El riesgo máximo en USDC NO cambia: es lo que el colchón preserva.
+    expect(con!.riskAmount).toBeCloseTo(sin!.riskAmount, 10)
+  })
+
+  it('ignora el colchón si no hay ATR utilizable (degrada al comportamiento sin colchón)', () => {
+    const s = bearishImpulseDone()
+    for (const atr of [null, undefined, 0, NaN]) {
+      const plan = computeRiskPlan(s, 100, 1000, 1, { atr, bufferAtr: 1 })
+      expect(plan!.stop).toBe(90)
+      expect(plan!.stopBuffer).toBe(0)
+    }
+  })
+})
