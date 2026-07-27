@@ -2,7 +2,7 @@ import type { Scenario } from '@/domain/elliott/types'
 import type { RiskPlan } from '@/domain/risk'
 import type { Bias } from '@/domain/indicators/trend'
 import { buildPreTradeChecklist, type PreTradeChecklist } from '@/domain/checklist'
-import { alignmentWithBias } from './useHigherTimeframe'
+import { tradeAlignmentWithBias } from './useHigherTimeframe'
 
 /**
  * Arma el checklist pre-entrada a partir del escenario y su plan de riesgo. FUENTE ÚNICA:
@@ -19,7 +19,9 @@ export function buildChecklistFor(
   if (!scenario || !plan) return null
   const vsaFactor = scenario.confluence.factors.find((f) => f.key === 'vol' || f.key === 'volB')
   return buildPreTradeChecklist({
-    align: higherBias ? alignmentWithBias(scenario.direction, higherBias) : 'neutral',
+    // Sobre el sentido en que se OPERA (no la dirección estructural): en un conteo
+    // completado el trade va al revés que la estructura.
+    align: higherBias ? tradeAlignmentWithBias(scenario, higherBias) : 'neutral',
     confidence: scenario.confidence,
     score: scenario.score,
     vsaMet: vsaFactor ? vsaFactor.met : null,

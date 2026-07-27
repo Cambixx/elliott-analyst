@@ -38,7 +38,7 @@ const FACTOR_LABEL: Record<string, string> = {
   rsiC: 'RSI extremo al final de C',
   regimen: 'Régimen (tendencia/volatilidad)',
 }
-import { alignmentWithBias, type HigherContext } from './useHigherTimeframe'
+import { tradeAlignmentWithBias, type HigherContext } from './useHigherTimeframe'
 import type { BacktestInsight } from './useBacktest'
 import { MarketContextCard } from '@/features/market-context/MarketContext'
 import { DerivativesCard } from '@/features/derivatives/DerivativesCard'
@@ -200,7 +200,9 @@ function ScenarioCard({
 }) {
   const meta = PATTERN_META[scenario.pattern]
   const accent = meta.accent
-  const align = alignmentWithBias(scenario.direction, bias)
+  // Alineación medida sobre el sentido en que se OPERARÍA el conteo (ver
+  // tradeAlignmentWithBias): un conteo completado se opera al revés que su estructura.
+  const align = tradeAlignmentWithBias(scenario, bias)
   const relations = waveRelations(scenario)
   const tradeBias = scenarioBias(scenario)
   const likelihood = scoreToLikelihood(scenario.score, calibration)

@@ -123,6 +123,25 @@ describe('buildAnalysisReport', () => {
     expect(flat(baseInput({ risk: null }))).toContain('no propone plan')
   })
 
+  it('avisa cuando el precio YA rebasó la invalidación de un conteo', () => {
+    // Zigzag bajista completado → se opera al alza; invalida por DEBAJO (100 aquí).
+    // Con el precio en 95 el conteo está muerto aunque siga en pantalla (se calcula
+    // sobre velas cerradas), así que el informe debe decirlo.
+    const s = zigzag({ invalidation: { price: 100, reason: 'test' } })
+    const text = flat(baseInput({ scenarios: [s], lastPrice: 95 }))
+    expect(text).toContain('YA ha rebasado esta invalidación')
+    expect(text).toContain('lectura de abajo está caducada')
+  })
+
+  it('no presenta como "recambio" alternativos que el precio ya invalidó', () => {
+    const principal = zigzag({ id: 'main', invalidation: { price: 80, reason: 'test' } })
+    // Alternativo ya muerto: se opera al alza e invalida en 100, con el precio en 88.
+    const muerto = zigzag({ id: 'alt', invalidation: { price: 100, reason: 'test' } })
+    const text = flat(baseInput({ scenarios: [principal, muerto], lastPrice: 88 }))
+    expect(text).toContain('no son recambio real')
+    expect(text).not.toContain('conteo(s) alternativo(s) vigente(s)')
+  })
+
   it('muestra la distancia al stop en PORCENTAJE (stopDistPct es una fracción)', () => {
     // Regresión: stopDistPct = stopDist/price (0.0279 = 2.79%). Sin el ×100 el informe
     // decía "0.03%" para un stop al 2.79%, subestimando el riesgo ~100 veces.

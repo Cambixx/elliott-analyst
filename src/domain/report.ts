@@ -83,6 +83,20 @@ function priceVsZone(price: number, z: { low: number; high: number }): string {
   return 'el precio está DENTRO de la zona'
 }
 
+/**
+ * ¿El precio EN VIVO ya rebasó la invalidación del conteo? Los escenarios se calculan
+ * sobre velas CERRADAS, así que entre cierre y cierre el precio puede haber matado un
+ * conteo que sigue en pantalla. Presentarlo entonces como "hipótesis de recambio" sería
+ * engañoso: aquí se detecta para poder decirlo. El lado del rebase depende del sentido
+ * en que se operaría (largo → invalida por debajo; corto → por encima).
+ */
+export function isInvalidated(s: Scenario, price: number | null | undefined): boolean {
+  if (price == null || !Number.isFinite(price)) return false
+  const b = scenarioBias(s)
+  if (b === 'vigilar') return false
+  return b === 'compra' ? price < s.invalidation.price : price > s.invalidation.price
+}
+
 function scenarioBlock(s: Scenario, price: number | null | undefined, cal: Calibration | null | undefined, rank: string): string[] {
   const bias = scenarioBias(s)
   const like = scoreToLikelihood(s.score, cal)
@@ -100,6 +114,11 @@ function scenarioBlock(s: Scenario, price: number | null | undefined, cal: Calib
   }
   lines.push(`Sesgo derivado: ${BIAS_TEXT[bias] ?? bias}.`)
   lines.push(`Invalidación: ${p(s.invalidation.price)} — ${s.invalidation.reason}`)
+  if (isInvalidated(s, price)) {
+    lines.push(
+      `Aviso: el precio actual (${p(price)}) YA ha rebasado esta invalidación — el conteo se calculó sobre velas cerradas y ha quedado superado. Descártalo hasta que el motor lo recalcule.`,
+    )
+  }
   if (s.target) {
     const inside = price != null ? ` (${priceVsZone(price, s.target)})` : ''
     lines.push(`Objetivo — ${s.target.label}: ${zoneText(s.target)}${inside}.`)
@@ -160,13 +179,28 @@ export function buildAnalysisReport(i: ReportInput): ReportSection[] {
   quick.push(
     `Confluencia: ${main.confluence.factors.filter((f) => f.met).length} de ${main.confluence.factors.length} factores a favor.`,
   )
-  if (i.scenarios.length > 1) {
+  if (isInvalidated(main, i.lastPrice)) {
     quick.push(
-      `Hay ${i.scenarios.length - 1} conteo(s) alternativo(s): ${i.scenarios
-        .filter((s) => s.id !== main.id)
-        .map((s) => `${PATTERN_LABEL[s.pattern]} ${s.direction === 'up' ? 'alcista' : 'bajista'} (${BIAS_TEXT[scenarioBias(s)] ?? ''})`)
-        .join('; ')}. Si el principal se invalida, son la hipótesis de recambio.`,
+      `ATENCIÓN: el precio ya ha rebasado la invalidación de este conteo. La lectura de abajo está caducada hasta que cierre la vela y el motor recalcule.`,
     )
+  }
+  const alts = i.scenarios.filter((s) => s.id !== main.id)
+  if (alts.length > 0) {
+    const live = alts.filter((s) => !isInvalidated(s, i.lastPrice))
+    const dead = alts.length - live.length
+    if (live.length > 0) {
+      quick.push(
+        `Hay ${live.length} conteo(s) alternativo(s) vigente(s): ${live
+          .map((s) => `${PATTERN_LABEL[s.pattern]} ${s.direction === 'up' ? 'alcista' : 'bajista'} (${BIAS_TEXT[scenarioBias(s)] ?? ''})`)
+          .join('; ')}. Si el principal se invalida, son la hipótesis de recambio.`,
+      )
+    }
+    // Nunca presentar como "recambio" un conteo que el precio ya ha matado.
+    if (dead > 0) {
+      quick.push(
+        `Otros ${dead} conteo(s) alternativo(s) aparecen abajo pero el precio YA rebasó su invalidación: no son recambio real.`,
+      )
+    }
   }
   sections.push({ title: 'Lectura rápida', lines: quick })
 
@@ -182,6 +216,7 @@ export function buildAnalysisReport(i: ReportInput): ReportSection[] {
   // --- 4. Confluencia del conteo principal --------------------------------------------
   const conf: string[] = [
     `Factores evaluados sobre el conteo principal (${main.confluence.factors.filter((f) => f.met).length}/${main.confluence.factors.length} cumplidos):`,
+    'Se miden EN EL GIRO de la estructura (sin look-ahead), no ahora: por eso un ADX/ATR de esta lista puede no coincidir con el régimen actual del apartado Contexto — miden momentos distintos, no se contradicen.',
   ]
   for (const f of main.confluence.factors) {
     conf.push(`${f.met ? '[✓]' : '[✗]'} ${f.label}${f.detail ? ` — ${f.detail}` : ''}`)
@@ -271,7 +306,7 @@ export function buildAnalysisReport(i: ReportInput): ReportSection[] {
   }
   if (rel.length > 0) {
     rel.push(
-      'Backtest walk-forward sin look-ahead, muestra pequeña por par. Mide la utilidad del conteo, no la rentabilidad. El pasado no garantiza el futuro.',
+      'Backtest walk-forward sin look-ahead, muestra pequeña por par. Mide si el conteo llegó a su objetivo antes que a su invalidación — NO el resultado del plan de riesgo de arriba, cuyo stop y objetivo pueden ser otros niveles. Mide la utilidad del conteo, no la rentabilidad. El pasado no garantiza el futuro.',
     )
     sections.push({ title: 'Fiabilidad histórica del motor', lines: rel })
   }

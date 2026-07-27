@@ -287,20 +287,24 @@ function buildAbc(
   //  - EN DESARROLLO (onda C en curso → continuación): el extremo de la onda B es
   //    el nivel cuya pérdida mata el pronóstico de continuación (y coincide con el
   //    stop del trade y con la pista de backtest → todo consistente).
-  //  - Completada plana expandida: la onda B ya superó el origen → extremo de B.
-  //  - Completada zigzag/plana: superar el origen invalida el conteo.
-  const invalidation =
-    developing || expanded
-      ? {
-          price: p[2].price,
-          reason: developing
-            ? `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría la continuación de la onda C.`
-            : `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría el conteo de plana expandida.`,
-        }
-      : {
-          price: p[0].price,
-          reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalidaría el conteo ${patternWord}.`,
-        }
+  //  - COMPLETADA: la tesis es "la corrección terminó y se reanuda la tendencia previa".
+  //    Lo que la refuta es que el precio EXTIENDA la onda C (la corrección seguía), no
+  //    que supere el origen: superar el origen es justamente la CONFIRMACIÓN de la
+  //    reanudación. Antes se usaba el origen, lo que dejaba la invalidación en el lado
+  //    contrario al trade y hacía que el objetivo de reanudación (el propio origen)
+  //    coincidiera con el nivel que mataba el conteo. Con el extremo de C, invalidación
+  //    = stop del trade = línea del gráfico, igual que ya ocurre en las ondas en curso.
+  const invalidation = developing
+    ? {
+        price: p[2].price,
+        reason: `Superar el extremo de la onda B (${fmt(p[2].price)}) invalidaría la continuación de la onda C.`,
+      }
+    : {
+        price: p[3].price,
+        reason:
+          `${down ? 'Perder' : 'Superar'} el extremo de la onda C (${fmt(p[3].price)}) indicaría que la ` +
+          `corrección ${patternWord} sigue en curso y no está completada.`,
+      }
 
   // En desarrollo (onda C en curso) → zona objetivo de CONTINUACIÓN de C (≈ onda A,
   // 0.618–1.618×A desde el fin de B). Completada → sin target (la reanudación apunta
@@ -407,16 +411,20 @@ function buildWxy(
   if (developing) warnings.push('Onda Y sin confirmar: puede repintar al llegar nuevas velas.')
 
   // Invalidación: en desarrollo (onda Y en curso → continuación) el nivel que mata
-  // el pronóstico es el pivote previo (P6); completada, superar el origen niega la
-  // corrección neta. Así el stop del trade y el backtest usan el mismo nivel.
+  // el pronóstico es el pivote previo (P6). COMPLETADA: lo que refuta "la corrección
+  // terminó" es que el precio EXTIENDA la onda Y, no que supere el origen (eso es la
+  // confirmación de la reanudación). Mismo criterio que en el ABC completado: así la
+  // invalidación coincide con el stop del trade y no con su objetivo.
   const invalidation = developing
     ? {
         price: p[6].price,
         reason: `Perder el nivel previo (${fmt(p[6].price)}) invalidaría la continuación de la onda Y.`,
       }
     : {
-        price: p[0].price,
-        reason: `Superar el origen de la corrección (${fmt(p[0].price)}) invalida la doble W-X-Y.`,
+        price: p[7].price,
+        reason:
+          `${down ? 'Perder' : 'Superar'} el extremo de la onda Y (${fmt(p[7].price)}) indicaría que la ` +
+          `corrección doble W-X-Y sigue en curso y no está completada.`,
       }
 
   const wMag = v(3) - v(0)
