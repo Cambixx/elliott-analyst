@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Scenario } from '@/domain/elliott/types'
-import { computeRiskPlan } from '@/domain/risk'
+import { computeRiskPlan, STOP_BUFFER_OPTIONS } from '@/domain/risk'
+import { confirmationTrigger } from '@/domain/elliott/trigger'
+import type { SrLevel } from '@/domain/elliott/levels'
 import { useRiskStore, RISK_PCT_OPTIONS } from '@/store/useRiskStore'
 import { useJournalStore } from '@/store/useJournalStore'
 import { formatPrice } from '@/lib/format'
-import { buildPreTradeChecklist, type FlagStatus, type TradeGrade } from '@/domain/checklist'
-import { alignmentWithBias } from './useHigherTimeframe'
+import { type FlagStatus, type TradeGrade } from '@/domain/checklist'
+import { buildChecklistFor } from './preTrade'
 import type { Bias } from '@/domain/indicators/trend'
 
 const FLAG_MARK: Record<FlagStatus, string> = { ok: '✓', warn: '•', against: '⚠', na: '•' }
@@ -48,6 +50,9 @@ export function RiskCalculatorCard({
   timeframe,
   higherBias,
   derivsAlignment,
+  atr,
+  levels,
+  alternatives,
 }: {
   scenario: Scenario | null
   price: number | null | undefined
@@ -55,30 +60,32 @@ export function RiskCalculatorCard({
   timeframe?: string
   higherBias?: Bias
   derivsAlignment?: 'refuerza' | 'cautela' | 'neutral' | null
+  /** ATR actual, para el colchón del stop. */
+  atr?: number | null
+  /** Niveles de reacción, para localizar el disparador de confirmación. */
+  levels?: SrLevel[]
+  /** Resto de conteos, para saber cuáles moriría el disparador. */
+  alternatives?: Scenario[]
 }) {
-  const { capital, riskPct, setCapital, setRiskPct } = useRiskStore()
+  const { capital, riskPct, stopBufferAtr, setCapital, setRiskPct, setStopBufferAtr } =
+    useRiskStore()
   const addToJournal = useJournalStore((s) => s.add)
   const [saved, setSaved] = useState(false)
   const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(savedTimer.current), []) // limpia el timer al desmontar
 
   const plan =
-    scenario && price != null ? computeRiskPlan(scenario, price, capital, riskPct) : null
+    scenario && price != null
+      ? computeRiskPlan(scenario, price, capital, riskPct, { atr, bufferAtr: stopBufferAtr })
+      : null
+
+  const trigger = scenario
+    ? confirmationTrigger(scenario, price, levels ?? [], alternatives ?? [])
+    : null
 
   // Checklist de disciplina, derivado de datos YA calculados. Se muestra en vivo y se
-  // CONGELA al guardar (se pasa este snapshot a add()). VSA = .met del factor del giro.
-  const vsaFactor = scenario?.confluence.factors.find((f) => f.key === 'vol' || f.key === 'volB')
-  const checklist =
-    scenario && plan
-      ? buildPreTradeChecklist({
-          align: higherBias ? alignmentWithBias(scenario.direction, higherBias) : 'neutral',
-          confidence: scenario.confidence,
-          score: scenario.score,
-          vsaMet: vsaFactor ? vsaFactor.met : null,
-          derivs: derivsAlignment ?? null,
-          rr: plan.rr,
-        })
-      : null
+  // CONGELA al guardar (se pasa este snapshot a add()). Fuente única con el informe.
+  const checklist = buildChecklistFor(scenario, plan, higherBias, derivsAlignment)
 
   const handleSave = () => {
     if (!plan || !scenario || !symbol) return
@@ -151,6 +158,24 @@ export function RiskCalculatorCard({
             ))}
           </select>
         </label>
+        <label
+          className="flex items-center gap-1"
+          title="Aleja el stop del nivel de invalidación para que una mecha sobre ese nivel no te saque. Cuesta R:R."
+        >
+          Colchón stop
+          <select
+            value={stopBufferAtr}
+            onChange={(e) => setStopBufferAtr(Number(e.target.value))}
+            className="rounded border border-slate-600 bg-slate-800 px-1 py-0.5 text-slate-200 outline-none"
+            aria-label="Colchón del stop en múltiplos de ATR"
+          >
+            {STOP_BUFFER_OPTIONS.map((b) => (
+              <option key={b} value={b}>
+                {b === 0 ? 'sin colchón' : `${b}× ATR`}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {!plan ? (
@@ -167,10 +192,22 @@ export function RiskCalculatorCard({
               <dd className="font-mono text-slate-300">{formatPrice(plan.entry)}</dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-slate-500">Stop ({plan.stopLabel})</dt>
+              <dt className="text-slate-500">
+                Stop ({plan.stopLabel})
+                {plan.stopBuffer > 0 && (
+                  <span className="text-slate-600"> +{plan.stopBufferAtr}×ATR</span>
+                )}
+              </dt>
               <dd className="font-mono text-red-200">
                 {formatPrice(plan.stop)}{' '}
                 <span className="text-slate-500">(-{(plan.stopDistPct * 100).toFixed(2)}%)</span>
+                {/* Con colchón se muestran los DOS: el nivel que define la tesis y el
+                    precio donde realmente se sale. */}
+                {plan.stopBuffer > 0 && (
+                  <span className="block text-[10px] text-slate-500">
+                    nivel {formatPrice(plan.stopLevel)}
+                  </span>
+                )}
               </dd>
             </div>
             <div className="flex justify-between gap-2">
@@ -203,6 +240,39 @@ export function RiskCalculatorCard({
                 <li key={i}>{w}</li>
               ))}
             </ul>
+          )}
+
+          {/* Disparador de confirmación: el precio al que la tesis deja de ser una
+              anticipación. Va justo antes del checklist porque responde a "¿entro ya
+              o espero?", que es la decisión previa a la de disciplina. */}
+          {trigger && (
+            <div className="mt-2 rounded border border-cyan-800/50 bg-cyan-950/20 p-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-cyan-300">
+                  Disparador de confirmación
+                </span>
+                <span className="ml-auto font-mono text-[11px] font-semibold text-cyan-200">
+                  {formatPrice(trigger.price)}
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                El plan de arriba entra <strong className="text-slate-300">anticipando</strong> el
+                giro. Romper esta {trigger.kind} ({trigger.strength}, {trigger.touches} toques,{' '}
+                {trigger.distancePct.toFixed(1)}% por {trigger.kind === 'resistencia' ? 'encima' : 'debajo'})
+                sería la primera prueba a favor: peor precio de entrada y menos recorrido al
+                objetivo, pero la tesis deja de ser anticipada.
+                {trigger.invalidates.length > 0 && (
+                  <>
+                    {' '}
+                    Además invalidaría el conteo contrario ({trigger.invalidates.join(', ')}): el
+                    mismo movimiento confirma esta lectura y descarta la opuesta.
+                  </>
+                )}
+              </p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Romper un nivel no garantiza nada: reduce la contradicción, no la incertidumbre.
+              </p>
+            </div>
           )}
 
           {checklist && (

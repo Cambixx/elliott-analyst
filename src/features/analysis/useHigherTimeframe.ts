@@ -4,6 +4,7 @@ import { fetchKlines } from '@/api/binance'
 import { higherTimeframe } from '@/domain/timeframe'
 import { trendBias, type Bias } from '@/domain/indicators/trend'
 import { detectScenariosMultiDegree } from '@/domain/elliott/detector'
+import { scenarioBias } from '@/domain/elliott/opportunity'
 import { degreeList } from '@/domain/elliott/backtest'
 import type { Timeframe } from '@/types/market'
 import type { Direction, Scenario } from '@/domain/elliott/types'
@@ -61,4 +62,22 @@ export function alignmentWithBias(
   const biasDir = biasDirection[bias]
   if (!biasDir) return 'neutral'
   return direction === biasDir ? 'favor' : 'contra'
+}
+
+/**
+ * Alineación del ESCENARIO CON EL MARCO SUPERIOR medida sobre el sentido en que se
+ * OPERARÍA, no sobre la dirección estructural del conteo. Es una distinción crítica:
+ * en un conteo COMPLETADO el trade va al revés que la estructura (una corrección
+ * bajista terminada se opera al alza), así que comparar `scenario.direction` marcaba
+ * "en contra del marco superior" justo cuando la operación iba A FAVOR — y eso además
+ * degradaba el grado del checklist que se congela en el diario. Un triángulo (sin
+ * sesgo accionable) es neutral por definición.
+ */
+export function tradeAlignmentWithBias(
+  scenario: Scenario,
+  bias: Bias,
+): 'favor' | 'contra' | 'neutral' {
+  const tb = scenarioBias(scenario)
+  if (tb === 'vigilar') return 'neutral'
+  return alignmentWithBias(tb === 'compra' ? 'up' : 'down', bias)
 }

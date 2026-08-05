@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { detectScenarios } from '@/domain/elliott/detector'
 import { scenarioBias } from '@/domain/elliott/opportunity'
+import { computeRiskPlan } from '@/domain/risk'
 import { candlesFromPath } from './helpers'
 
 describe('detectScenarios (smoke sobre datos sintéticos)', () => {
@@ -117,6 +118,64 @@ describe('corrección ABC en desarrollo (continuación de la onda C)', () => {
     // Invalidación = extremo de la onda B (p[2] ≈ 90), no el origen (100).
     expect(abc!.invalidation.price).toBeCloseTo(90, 0)
     expect(abc!.invalidation.reason).toContain('onda B')
+  })
+})
+
+/**
+ * Regresión: en una corrección COMPLETADA la tesis es "la corrección terminó y se
+ * reanuda la tendencia previa". Lo que la refuta es que el precio EXTIENDA la onda C,
+ * no que supere el origen — superar el origen es la CONFIRMACIÓN de la reanudación.
+ * Con el origen como invalidación, el objetivo de reanudación (que ES el origen)
+ * coincidía con el nivel que mataba el conteo: el trade ganaba y se invalidaba a la vez.
+ */
+describe('corrección ABC completada (reanudación)', () => {
+  // Zigzag bajista 100→80→90→70 y luego rebote a 78, que CONFIRMA el pivote de C.
+  const candles = candlesFromPath([100, 80, 90, 70, 78], 6)
+  const abc = detectScenarios(candles, 1.6).scenarios.find(
+    (s) => s.pattern === 'zigzag' && !s.developing,
+  )
+
+  it('invalida en el extremo de la onda C, no en el origen', () => {
+    expect(abc).toBeDefined()
+    expect(abc!.invalidation.price).toBeCloseTo(70, 0)
+    expect(abc!.invalidation.reason).toContain('onda C')
+    // El origen (100) NO es la invalidación: superarlo confirma la reanudación.
+    expect(abc!.invalidation.price).not.toBeCloseTo(100, 0)
+  })
+
+  it('la invalidación queda del MISMO lado que el stop del trade (no en el objetivo)', () => {
+    // Corrección bajista completada → se opera al alza (reanudación). El objetivo es el
+    // origen, por encima; la invalidación debe quedar por DEBAJO de la entrada.
+    expect(scenarioBias(abc!)).toBe('compra')
+    const entry = candles[candles.length - 1].close
+    expect(abc!.invalidation.price).toBeLessThan(entry)
+    const plan = computeRiskPlan(abc!, entry, 1000, 1)
+    expect(plan).not.toBeNull()
+    // El corazón del bug: objetivo y invalidación ya no son el mismo número.
+    expect(plan!.targetNear).not.toBeCloseTo(abc!.invalidation.price, 0)
+    expect(plan!.stop).toBeCloseTo(abc!.invalidation.price, 0)
+  })
+})
+
+/**
+ * Regresión: el verbo de la invalidación debe seguir al SENTIDO de la estructura. En una
+ * diagonal BAJISTA la onda 5 es un mínimo, así que lo que niega su fin es PERDERLO; el
+ * texto decía siempre "Superar", señalando el lado contrario al real.
+ */
+describe('diagonal completada: verbo de invalidación según el sentido', () => {
+  it('una diagonal bajista invalida por PERDER el extremo de la onda 5', () => {
+    // Cuña bajista contractiva (w1=15, w3=13, w5=10) con la onda 4 (88) solapando la
+    // onda 1 (85), y rebote final a 84 que CONFIRMA el pivote de la onda 5.
+    const candles = candlesFromPath([100, 85, 93, 80, 88, 78, 84], 6)
+    const diag = detectScenarios(candles, 1.3).scenarios.find(
+      (s) => s.pattern === 'diagonal' && s.direction === 'down' && !s.developing,
+    )
+    // Sin escapatoria: si el sintético dejara de producir la diagonal, el test FALLA
+    // (avisando de que ya no cubre nada) en vez de pasar en vacío.
+    expect(diag).toBeDefined()
+    expect(diag!.invalidation.price).toBeCloseTo(78, 0)
+    expect(diag!.invalidation.reason).toContain('Perder')
+    expect(diag!.invalidation.reason).not.toContain('Superar')
   })
 })
 

@@ -159,16 +159,20 @@ export default function App() {
 
   // Tolerancia de agrupado ADAPTATIVA a la volatilidad: ~la mitad de un ATR14 relativo,
   // acotada [0.3%, 1.5%]. Fija sobre-agrupaba en calma y fragmentaba en volatilidad.
-  const srLevelsRaw = useMemo(() => {
+  // ATR14 actual: alimenta la tolerancia de agrupado de S/R y el colchón del stop.
+  const lastAtr = useMemo(() => {
     const atr = computeATR(closedCandles, 14)
-    const lastAtr = atr[atr.length - 1]
+    const v = atr[atr.length - 1]
+    return Number.isFinite(v) && v > 0 ? v : null
+  }, [closedCandles])
+  const srLevelsRaw = useMemo(() => {
     const lastClose = closedCandles[closedCandles.length - 1]?.close
     const tolerancePct =
-      Number.isFinite(lastAtr) && lastAtr > 0 && lastClose
+      lastAtr != null && lastClose
         ? Math.min(0.015, Math.max(0.003, (0.5 * lastAtr) / lastClose))
         : undefined
     return supportResistance(pivots, { tolerancePct, nowIndex: closedCandles.length - 1 })
-  }, [pivots, closedCandles])
+  }, [pivots, closedCandles, lastAtr])
   const srLevels: SrDrawItem[] = useMemo(() => {
     if (lastPrice == null) return []
     return srLevelsRaw.map((l) => {
@@ -377,6 +381,7 @@ export default function App() {
           fibZone={fibZone}
           vwap={vwap}
           structureLevels={srLevelsRaw}
+          atr={lastAtr}
           forecast={forecast}
           lastPrice={lastPrice}
           closedPrice={closedPrice}
